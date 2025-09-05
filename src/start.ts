@@ -24,9 +24,7 @@ import {
   generateManagerVoterWallets,
 } from './utils/wallet';
 import { prompt } from './utils/prompt';
-import { prepareTransaction } from './utils/prepare';
-import { sendTransaction } from './utils/send';
-import { signTransaction, getBase64EncodedWireTransaction, type Instruction } from '@solana/kit';
+import { signAndSendTransaction } from './utils/sign';
 import { checkSolBalance } from './utils/balance';
 
 // USDC mint address on devnet
@@ -128,23 +126,12 @@ async function createMultisigProgrammatically(manager: CryptoKeyPair, voter1: Ad
       memo: 'Multisig created via Solana Kit and Squads utils',
     });
 
-    // Prepare transaction using @solana/kit
-    const transaction = await prepareTransaction(
-      [multisigCreateInstruction as Instruction<string>],
+    // Send and confirm transaction using utility function
+    const signature = await signAndSendTransaction(
+      [multisigCreateInstruction],
+      [manager, ephemeralKeypair],
       managerAddress
     );
-    
-    // Sign transaction
-    const signedTransaction = await signTransaction(
-      [manager, ephemeralKeypair],
-      transaction
-    );
-    
-    // Get wire transaction
-    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    
-    // Send transaction
-    const signature = await sendTransaction(wireTransaction);
     
     console.log('✅ Multisig created!');
     console.log(`🏛️  Address: ${multisigPda}`);
@@ -255,23 +242,12 @@ async function sendSOLToVoters(
     
     console.log('📤 Sending SOL transfers...');
     
-    // Prepare transaction using @solana/kit
-    const transaction = await prepareTransaction(
-      instructions as Instruction<string>[],
+    // Send and confirm transaction using utility function
+    const signature = await signAndSendTransaction(
+      instructions,
+      [sender],
       senderAddress
     );
-    
-    // Sign transaction
-    const signedTransaction = await signTransaction(
-      [sender],
-      transaction
-    );
-    
-    // Get wire transaction
-    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    
-    // Send transaction
-    const signature = await sendTransaction(wireTransaction);
     
     console.log(`✅ SOL transfers successful!`);
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}`);
@@ -308,23 +284,12 @@ async function depositSOLToVault(
     console.log('📤 Sending SOL deposit to vault...');
     const senderAddress = await getAddressFromPublicKey(sender.publicKey);
     
-    // Prepare transaction using @solana/kit
-    const transaction = await prepareTransaction(
-      transferIxns as Instruction<string>[],
+    // Send and confirm transaction using utility function
+    const signature = await signAndSendTransaction(
+      transferIxns,
+      [sender],
       senderAddress
     );
-    
-    // Sign transaction
-    const signedTransaction = await signTransaction(
-      [sender],
-      transaction
-    );
-    
-    // Get wire transaction
-    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    
-    // Send transaction
-    const signature = await sendTransaction(wireTransaction);
     
     console.log(`✅ SOL deposit to vault successful!`);
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}`);
@@ -360,23 +325,12 @@ async function createUSDCTransferToMultisig(
     console.log('📤 Sending USDC transfer transaction...');
     const senderAddress = await getAddressFromPublicKey(sender.publicKey);
     
-    // Prepare transaction using @solana/kit
-    const transaction = await prepareTransaction(
-      transferIxns as Instruction<string>[],
+    // Send and confirm transaction using utility function
+    const signature = await signAndSendTransaction(
+      transferIxns,
+      [sender],
       senderAddress
     );
-    
-    // Sign transaction
-    const signedTransaction = await signTransaction(
-      [sender],
-      transaction
-    );
-    
-    // Get wire transaction
-    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    
-    // Send transaction
-    const signature = await sendTransaction(wireTransaction);
     
     console.log(`✅ USDC transfer successful!`);
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}`);

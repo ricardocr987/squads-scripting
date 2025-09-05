@@ -4,16 +4,12 @@ import {
 import { 
   address,
   createSignerFromKeyPair,
-  getAddressFromPublicKey,
-  signTransaction,
-  getBase64EncodedWireTransaction,
-  type Instruction
+  getAddressFromPublicKey
 } from '@solana/kit';
 import { transferInstruction } from './utils/transfer';
 import { loadWalletFromConfig, loadMultisigAddressFromConfig } from './utils/config';
 import { prompt } from './utils/prompt';
-import { prepareTransaction } from './utils/prepare';
-import { sendTransaction } from './utils/send';
+import { signAndSendTransaction } from './utils/sign';
 import { checkSolBalance } from './utils/balance';
 import { USDC_MINT_DEVNET as USDC_MINT } from './utils/constants';
 
@@ -48,23 +44,12 @@ async function transferToMultisigVault(
     console.log('📤 Sending transfer transaction...');
     const senderAddress = await getAddressFromPublicKey(sender.publicKey);
     
-    // Prepare transaction using @solana/kit
-    const transaction = await prepareTransaction(
-      transferIxns as Instruction<string>[],
+    // Send and confirm transaction using utility function
+    const signature = await signAndSendTransaction(
+      transferIxns,
+      [sender],
       senderAddress
     );
-    
-    // Sign transaction
-    const signedTransaction = await signTransaction(
-      [sender],
-      transaction
-    );
-
-    // Get wire transaction
-    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    
-    // Send and confirm transaction
-    const signature = await sendTransaction(wireTransaction);
     
     console.log(`✅ Transfer to multisig vault successful!`);
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}?cluster=devnet`);

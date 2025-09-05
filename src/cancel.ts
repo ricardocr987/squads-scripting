@@ -11,9 +11,7 @@ import {
 } from '@solana/kit';
 import { loadWalletFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
-import { prepareTransaction } from './utils/prepare';
-import { sendTransaction } from './utils/send';
-import { signTransaction, getBase64EncodedWireTransaction, type Instruction } from '@solana/kit';
+import { signAndSendTransaction } from './utils/sign';
 import { sleep } from 'bun';
 import { rpc } from './utils/rpc';
 
@@ -95,23 +93,12 @@ async function main() {
 
         console.log('📤 Sending cancellation transaction...');
         
-        // Prepare transaction using @solana/kit
-        const transaction = await prepareTransaction(
-          [cancelInstruction as Instruction<string>],
+        // Send and confirm transaction using utility function
+        const signature = await signAndSendTransaction(
+          [cancelInstruction],
+          [executor],
           signerAddress
         );
-        
-        // Sign transaction
-        const signedTransaction = await signTransaction(
-          [executor],
-          transaction
-        );
-        
-        // Get wire transaction
-        const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
-        
-        // Send transaction
-        const signature = await sendTransaction(wireTransaction);
         
         console.log(`✅ Proposal ${proposal.index} cancelled`);
         console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}`);

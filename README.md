@@ -284,8 +284,7 @@ const transferInstruction = createTransferInstruction(
 1. **Vault Transaction Creation** - Creates the actual transfer instruction
 2. **Proposal Creation** - Makes the transaction available for voting
 3. **Instruction Conversion** - Converts web3.js instructions to @solana/kit format
-4. **Transaction Signing** - Signs with proposer's keypair
-5. **Network Submission** - Sends to Solana network
+4. **Sign and Send** - Signs transaction and submits to network using utility function
 
 ### ✅ Approval Management (`approve.ts`)
 
@@ -314,8 +313,7 @@ const approveInstruction = getProposalApproveInstruction({
 1. **Load multisig data** - Fetches current transaction index and member info
 2. **Select transaction** - User chooses which transaction to approve
 3. **Choose voter** - Select which member will cast the vote
-4. **Create instruction** - Generates approval instruction
-5. **Sign and send** - Signs transaction and submits to network
+4. **Sign and send** - Creates instruction, signs transaction and submits to network using utility function
 
 ### 🚀 Transaction Execution (`execute.ts`)
 
@@ -344,8 +342,7 @@ const vaultInstruction = fromLegacyTransactionInstruction(executeInstructionResu
 1. **Load transaction data** - Fetches proposal and transaction PDAs
 2. **Validate approvals** - Ensures sufficient votes for execution
 3. **Check permissions** - Verifies executor has execution rights
-4. **Create instruction** - Generates execution instruction
-5. **Execute transaction** - Signs and submits to network
+4. **Execute transaction** - Creates instruction, signs and submits to network using utility function
 
 ### 🚫 Interactive Rejection System (`reject.ts`)
 
@@ -381,7 +378,7 @@ if (!isStale && (status === 'Active' || status === 'Approved')) {
 3. **Select proposal** - User chooses which to reject
 4. **Choose member** - Select signing member
 5. **Confirm action** - User confirms rejection
-6. **Execute rejection** - Signs and submits rejection transaction
+6. **Execute rejection** - Creates instruction, signs and submits rejection transaction using utility function
 
 ### ❌ Stale Proposal Cancellation (`cancel.ts`)
 
@@ -440,7 +437,7 @@ const canClose = isStale ||
 3. **Select transactions** - User chooses which to close
 4. **Choose member** - Select signing member
 5. **Confirm action** - User confirms cleanup
-6. **Execute cleanup** - Closes selected transactions
+6. **Execute cleanup** - Creates instruction, signs and submits close transaction using utility function
 
 ### 💰 Transfer to Treasury (`transfer.ts`)
 
@@ -476,7 +473,7 @@ const transferInstruction = createTransferInstruction(
 1. **Load vault data** - Fetches vault address and current balances
 2. **Validate sender balance** - Ensures sufficient funds for transfer
 3. **Create transfer instruction** - Generates appropriate transfer instruction
-4. **Sign and send** - Signs transaction and submits to network
+4. **Sign and send** - Signs transaction and submits to network using utility function
 5. **Confirm transfer** - Verifies successful completion
 
 ### @solana/kit Integration
@@ -484,20 +481,12 @@ const transferInstruction = createTransferInstruction(
 Unified API for all Solana operations:
 
 ```typescript
-// Transaction preparation with @solana/kit
-const transaction = await prepareTransaction(
-  [instruction as Instruction<string>],
+// Transaction preparation and sending with @solana/kit utility
+const signature = await signAndSendTransaction(
+  [instruction],
+  [signer],
   payerAddress
 );
-
-// Transaction signing
-const signedTransaction = await signTransaction(
-  [signer],
-  transaction
-);
-
-// Transaction sending
-const signature = await sendTransaction(wireTransaction);
 ```
 
 ```typescript

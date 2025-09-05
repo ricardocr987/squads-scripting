@@ -3,15 +3,15 @@ import * as multisig from '@sqds/multisig';
 import {
     getAddressFromPublicKey,
     address,
-    signTransaction,
-    getBase64EncodedWireTransaction,
-    type Instruction
+    type Instruction,
+    createSignerFromKeyPair
 } from '@solana/kit';
 import { fromLegacyTransactionInstruction } from '@solana/compat';
 import { 
     getVaultPda,
     getProposalPda,
     fetchMultisig,
+    getProposalCreateInstruction,
 } from './utils/squads/index';
 import { 
     PublicKey,
@@ -28,8 +28,8 @@ import {
 } from '@solana/spl-token';
 import { loadWalletFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
+import { signAndSendTransaction } from './utils/sign';
 import { prompt } from './utils/prompt';
-import { prepareTransaction } from './utils/prepare';
 import { sendTransaction } from './utils/send';
 import { USDC_MINT_DEVNET as USDC_MINT } from './utils/constants';
 import { solanaConnection, rpc } from './utils/rpc';
@@ -173,67 +173,42 @@ async function proposePaymentTransaction(
     // Convert the Squads SDK instruction to @solana/kit format
     const vaultInstruction = fromLegacyTransactionInstruction(vaultTransaction);
     
-    // Prepare transaction using @solana/kit
-    const vaultTransactionMessage = await prepareTransaction(
+    // Send and confirm transaction using utility function
+    const vaultTxSignature = await signAndSendTransaction(
       [vaultInstruction as Instruction<string>],
+      [proposer],
       proposerAddress
     );
-    
-    // Sign transaction
-    const signedVaultTransaction = await signTransaction(
-      [proposer],
-      vaultTransactionMessage
-    );
-
-    // Get wire transaction
-    const vaultWireTransaction = getBase64EncodedWireTransaction(signedVaultTransaction);
-    
-    // Send and confirm transaction
-    const vaultTxSignature = await sendTransaction(vaultWireTransaction);
     
     console.log(`✅ Vault transaction created: ${vaultTxSignature}`);
     
-    // Create proposal instruction using Squads SDK
-    const createProposalIx = multisig.instructions.proposalCreate({
-      multisigPda: new PublicKey(multisigPda),
+    // Create proposal instruction using Codama generated instructions
+    const [proposalPda] = await getProposalPda(multisigPda, newTransactionIndex);
+    const createProposalIx = getProposalCreateInstruction({
+      multisig: address(multisigPda),
+      proposal: address(proposalPda),
+      creator: await createSignerFromKeyPair(proposer),
+      rentPayer: await createSignerFromKeyPair(proposer),
+      systemProgram: address('11111111111111111111111111111111'),
       transactionIndex: newTransactionIndex,
-      creator: new PublicKey(proposerAddress),
-      isDraft: false, // This ensures the proposal is active and ready for voting
+      draft: false, // This ensures the proposal is active and ready for voting
     });
     
     console.log('📤 Creating proposal...');
-    
-    // Convert the Squads SDK instruction to @solana/kit format
-    const proposalInstruction = fromLegacyTransactionInstruction(createProposalIx);
-    
-    // Prepare transaction using @solana/kit
-    const proposalTransactionMessage = await prepareTransaction(
-      [proposalInstruction as Instruction<string>],
+        
+    // Send and confirm transaction using utility function
+    const proposalTxSignature = await signAndSendTransaction(
+      [createProposalIx],
+      [proposer],
       proposerAddress
     );
     
-    // Sign transaction
-    const signedProposalTransaction = await signTransaction(
-      [proposer],
-      proposalTransactionMessage
-    );
-
-    // Get wire transaction
-    const proposalWireTransaction = getBase64EncodedWireTransaction(signedProposalTransaction);
-    
-    // Send and confirm transaction
-    const proposalTxSignature = await sendTransaction(proposalWireTransaction);
-    
     console.log(`✅ Proposal created: ${proposalTxSignature}`);
     
-    // Get the proposal PDA
-    const [proposalPda] = await getProposalPda(multisigPda, newTransactionIndex);
-    
+    // Get the proposal PDA    
     await sleep(2000); // Wait a bit longer for account initialization
     
     console.log(`\n🎉 Payment proposal created successfully!`);
-    console.log(`🔗 Vault Transaction: ${vaultTxSignature}`);
-    console.log(`🔗 Proposal Transaction: ${proposalTxSignature}`);
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${proposalTxSignature}?cluster=devnet`);
     console.log(`💸 Proposed payment: ${amount} ${paymentType} to ${recipientAddress}`);
     console.log(`📋 Transaction Index: ${newTransactionIndex}`);
