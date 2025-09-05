@@ -1,14 +1,14 @@
 # Advanced Squads Multisig Management System
 
-A comprehensive TypeScript framework for managing Squads multisig operations on Solana, built with modern development tool as Bun and @solana/kit. This system provides a complete lifecycle management solution for multisig transactions: **Initialize → Propose → Approve → Execute → Cleanup**.
+A comprehensive TypeScript framework for managing Squads multisig operations on Solana, built with modern development tools including Bun and @solana/kit. This system provides a complete lifecycle management solution for multisig transactions: **Initialize → Propose → Approve → Execute → Cleanup**.
 
 ## 🏗️ Architecture & Technology Stack
 
 ### Core Technologies
 
-**Solana Kit** is a modern TypeScript framework that provides:
+**@solana/kit** is a modern TypeScript framework that provides:
 - **Type-safe RPC interactions** with automatic serialization/deserialization
-- **Transaction building** with instruction composition
+- **Transaction building** with instruction composition and signing
 
 **Squads program** offers:
 - **Programmable permissions** with granular access control
@@ -16,35 +16,42 @@ A comprehensive TypeScript framework for managing Squads multisig operations on 
 
 **Codama** provides:
 - **Automated IDL parsing** from Anchor program definitions
-- **Type-safe client generation** to build program instructions, get and parse data
+- **Type-safe client generation** to build program instructions
+- **Runtime validation** of instruction parameters
 
 ### System Architecture
 
 ```typescript
 // Core system components
 src/
+├── index.ts           // Main CLI entry point with interactive menu
 ├── start.ts           // Multisig initialization and treasury setup
-├── propose.ts         // Payment proposal creation
-├── approve.ts         // Member voting and approval
+├── propose.ts         // Payment proposal creation with ATA handling
+├── approve.ts         // Member voting and approval system
 ├── execute.ts         // Transaction execution and confirmation
-├── close.ts           // Account cleanup and rent recovery
+├── reject.ts          // Interactive proposal rejection
+├── cancel.ts          // Stale proposal cancellation
+├── close.ts           // Interactive account cleanup and rent recovery
+├── config.ts          // Direct multisig configuration management
+├── transfer.ts        // Direct transfers to multisig vault
+├── info.ts            // Comprehensive multisig information dashboard
 └── utils/
     ├── squads/        // Squads utils generated with Codama
     ├── config.ts      // Local file I/O operations
     ├── wallet.ts      // CryptoKeyPair management
     ├── balance.ts     // Token balance monitoring and validation
-    ├── transfer.ts    // Transfer instruction
-    └── compute.ts     // Compute units, priority fees and transaction simulation
+    ├── transfer.ts    // Transfer instruction utilities
+    ├── prepare.ts     // Transaction preparation with @solana/kit
+    ├── send.ts        // Transaction sending and confirmation
+    ├── sign.ts        // Transaction signing utilities
+    └── prompt.ts      // Interactive CLI prompts
 ```
 
 ## 🚀 Quick Start
 
 ### Prerequisites
 
-- **Bun Runtime** (v1.0+) - High-performance JavaScript runtime
-- **TypeScript** (v5.0+) - Type-safe development
-- **Solana CLI** - For program deployment and testing
-- **RPC Endpoint** - QuickNode, Alchemy, or custom Solana RPC
+- **Bun** - High-performance JavaScript runtime (https://bun.com/docs/installation)
 
 ### Installation
 
@@ -63,250 +70,407 @@ cp env.example .env
 ### Environment Configuration
 
 ```env
-# RPC Configuration
 RPC_URL=https://api.devnet.solana.com
-
-# Optional: Custom RPC settings
-RPC_COMMITMENT=confirmed
-RPC_TIMEOUT=30000
 ```
 
-## 📋 Complete Workflow Implementation
+### Running the System
 
-### Stage 1: System Initialization (`start.ts`)
+```bash
+# Start the interactive CLI
+bun run start
 
-The initialization process establishes a complete multisig and keypairs environment.
-
-#### Wallet Generation & Management
-
-The system implements keypair generation using native Web Crypto APIs:
-
-```typescript
-// Secure keypair generation using Solana Kit
-const keypair = await generateKeyPair();
-
-// Type-safe keypair management
-interface WalletCollection {
-  proposer: CryptoKeyPair;  // Can create proposals only
-  voter1: CryptoKeyPair;    // Full voting and execution rights
-  voter2: CryptoKeyPair;    // Full voting and execution rights
-}
+# Or run individual scripts
+bun run src/start.ts    # Initialize multisig
+bun run src/propose.ts  # Create payment proposal
+bun run src/approve.ts  # Approve transaction
+bun run src/execute.ts  # Execute transaction
 ```
 
-#### Multisig Configuration
+## 📋 Complete Script Documentation
 
-The system creates multisigs with granular permission management:
+### 🎯 Main CLI Interface (`index.ts`)
 
+The central command-line interface that orchestrates all multisig operations.
+
+**Key Features:**
+- **Auto-setup detection** - Automatically runs initialization if no config exists
+- **Interactive menu** - User-friendly command selection
+
+**Menu Structure:**
 ```typescript
-// Advanced multisig configuration
+1. ⚙️ Manage Multisig Config     // Controlled multisig instructions
+2. 📊 View Information           // Comprehensive dashboard
+3. 💸 Create Payment Proposal    // Transaction proposals
+4. ✅ Approve Transaction        // Voting system
+5. 🚀 Execute Transaction        // Transaction execution
+6. 🚫 Reject Proposals          // Interactive rejection
+7. ❌ Cancel Proposals          // Stale proposal cleanup
+8. 🧹 Cleanup Transactions      // Account cleanup
+9. 💰 Transfer to Treasury      // Direct vault funding
+```
+
+### 🚀 System Initialization (`start.ts`)
+
+Comprehensive multisig setup with automated funding and configuration.
+
+**Core Functionality:**
+- **Wallet generation** - Creates manager and voter keypairs
+- **SOL airdrop** - Requests devnet SOL
+- **USDC funding guidance** - Provides Circle faucet instructions
+- **Multisig creation** - Sets up controlled multisig with proper permissions
+- **Vault funding** - Deposits SOL and USDC to multisig vault
+- **Voter Funding** - Sends 0.001 SOL to each voter for transaction fees
+
+**Permission Structure:**
+```typescript
 const multisigConfig = {
   threshold: 2,                    // 2-of-3 approval required
   timeLock: 0,                    // No time delay for execution
   members: [
     {
-      key: proposer.publicKey,
-      permissions: { mask: 1 },   // PROPOSE permission only
-    },
-    {
-      key: voter1.publicKey,
+      key: managerAddress,
       permissions: { mask: 7 },   // All permissions (PROPOSE + VOTE + EXECUTE)
     },
     {
-      key: voter2.publicKey,
-      permissions: { mask: 7 },   // All permissions
+      key: voter1Address,
+      permissions: { mask: 2 },   // Vote permission only
+    },
+    {
+      key: voter2Address,
+      permissions: { mask: 2 },   // Vote permission only
     }
   ]
 };
 ```
 
-#### Treasury Management
+### 💸 Payment Proposal System (`propose.ts`)
 
-The system implements automated treasury funding with USDC support:
+Advanced payment proposal creation with automatic token account handling.
 
+**Key Features:**
+- **Dual token support** - SOL and USDC payment proposals
+- **ATA creation** - Automatically creates recipient token accounts if needed
+- **Transaction batching** - Combines ATA creation and transfer instructions
+- **Comprehensive validation** - Checks balances and account existence
+
+**SOL Transfer Implementation:**
 ```typescript
-// USDC treasury funding with proper decimal handling
-const transferAmount = BigInt(0.1 * Math.pow(10, 6)); // 0.1 USDC in micro-units
-const transferInstruction = await transferInstruction(
-  await createSignerFromKeyPair(sender),
-  transferAmount,
-  USDC_MINT,
-  treasuryPda
-);
-```
-
-### Stage 2: Payment Proposal System (`propose.ts`)
-
-The proposal system implements secure payment creation with comprehensive validation and error handling.
-
-#### Transaction Message Construction
-
-```typescript
-// Advanced transaction message preparation
-const transactionMessage = await prepareTransaction(
-  [transferInstruction],
-  treasuryPda,
-  {
-    priorityFee: await getPriorityFeeEstimate(),
-    computeUnits: await estimateComputeUnits(transferInstruction)
-  }
-);
-```
-
-#### Vault Transaction Creation
-
-```typescript
-// Vault transaction with proper PDA derivation
-const vaultTransactionInstruction = getVaultTransactionCreateInstruction({
-  multisig: address(multisigPda),
-  transaction: address(transactionPda),
-  creator: await createSignerFromKeyPair(proposer),
-  args: {
-    vaultIndex: 0,
-    ephemeralSigners: 0,
-    transactionMessage: new Uint8Array(transactionMessage.messageBytes),
-    memo: `Payment: ${amount} USDC to ${recipientAddress}`
-  }
+// Direct SOL transfer using SystemProgram
+const transferInstruction = SystemProgram.transfer({
+  fromPubkey: new PublicKey(vaultPda),
+  toPubkey: new PublicKey(recipientAddress),
+  lamports: transferAmount,
 });
 ```
 
-### Stage 3: Approval Management (`approve.ts`)
-
-The approval system provides secure voting mechanisms with comprehensive validation.
-
-#### Proposal Validation
-
+**USDC Transfer with ATA Creation:**
 ```typescript
-// Comprehensive proposal validation
-const proposalInfo = await getProposalInfo(proposalPda);
-if (proposalInfo.status !== 'Active') {
-  throw new Error('Proposal is not in active state');
+// Check if recipient token account exists
+const accountInfo = await solanaConnection.getAccountInfo(recipientTokenAccount);
+if (!accountInfo) {
+  // Create ATA instruction
+  const createTokenAccountInstruction = createAssociatedTokenAccountInstruction(
+    new PublicKey(vaultPda),        // payer
+    recipientTokenAccount,          // ATA address
+    new PublicKey(recipientAddress), // owner
+    new PublicKey(USDC_MINT),       // mint
+    TOKEN_PROGRAM_ID,
+    ASSOCIATED_TOKEN_PROGRAM_ID
+  );
+  instructions.push(createTokenAccountInstruction);
 }
 
-// Check voting eligibility
-const memberInfo = await getMultisigMemberInfo(multisigPda, voter.publicKey);
-if (!memberInfo.permissions.vote) {
-  throw new Error('Member does not have voting permissions');
-}
+// Add transfer instruction
+const transferInstruction = createTransferInstruction(
+  vaultTokenAccount,
+  recipientTokenAccount,
+  new PublicKey(vaultPda),
+  transferAmount,
+  [],
+  TOKEN_PROGRAM_ID
+);
 ```
 
-#### Approval Instruction Creation
+**Transaction Flow:**
+1. **Vault Transaction Creation** - Creates the actual transfer instruction
+2. **Proposal Creation** - Makes the transaction available for voting
+3. **Instruction Conversion** - Converts web3.js instructions to @solana/kit format
+4. **Transaction Signing** - Signs with proposer's keypair
+5. **Network Submission** - Sends to Solana network
 
+### ✅ Approval Management (`approve.ts`)
+
+Streamlined voting system for transaction approval.
+
+**Core Features:**
+- **Interactive member selection** - Choose which member votes
+- **Transaction index handling** - Support for specific or latest transactions
+- **Permission validation** - Ensures voter has voting rights
+- **Real-time feedback** - Shows approval status and transaction details
+
+**Approval Process:**
 ```typescript
-// Type-safe approval instruction
-const approvalInstruction = getProposalApproveInstruction({
+// Create approval instruction codama utils
+const approveInstruction = getProposalApproveInstruction({
   multisig: address(multisigPda),
   proposal: address(proposalPda),
   member: await createSignerFromKeyPair(voter),
   args: {
-    memo: `Approved by ${voterAddress}`
-  }
+    memo: `Approved by ${voterAddress}`,
+  },
 });
 ```
 
-### Stage 4: Transaction Execution (`execute.ts`)
+**Voting Workflow:**
+1. **Load multisig data** - Fetches current transaction index and member info
+2. **Select transaction** - User chooses which transaction to approve
+3. **Choose voter** - Select which member will cast the vote
+4. **Create instruction** - Generates approval instruction
+5. **Sign and send** - Signs transaction and submits to network
 
-The execution system provides secure transaction processing with comprehensive error handling.
+### 🚀 Transaction Execution (`execute.ts`)
 
-#### Execution Validation
+Execution of approved transactions with comprehensive validation.
 
+**Execution Features:**
+- **Pre-execution validation** - Checks approval status and permissions
+- **Squads SDK integration** - Uses SDK for execution instructions
+- **Instruction conversion** - Converts web3.js to @solana/kit format
+
+**Execution Implementation:**
 ```typescript
-// Pre-execution validation
-const proposalInfo = await getProposalInfo(proposalPda);
-if (proposalInfo.approvals.length < multisigInfo.threshold) {
-  throw new Error('Insufficient approvals for execution');
-}
+// Create execution instruction using Squads SDK
+const executeInstructionResult = await multisig.instructions.vaultTransactionExecute({
+  connection: solanaConnection,
+  multisigPda: new PublicKey(multisigPda),
+  transactionIndex: transactionIndex,
+  member: new PublicKey(executorAddress),
+});
 
-// Check execution permissions
-const executorInfo = await getMultisigMemberInfo(multisigPda, executor.publicKey);
-if (!executorInfo.permissions.execute) {
-  throw new Error('Executor does not have execution permissions');
+// Convert to @solana/kit format with @solana/compat
+const vaultInstruction = fromLegacyTransactionInstruction(executeInstructionResult.instruction);
+```
+
+**Execution Workflow:**
+1. **Load transaction data** - Fetches proposal and transaction PDAs
+2. **Validate approvals** - Ensures sufficient votes for execution
+3. **Check permissions** - Verifies executor has execution rights
+4. **Create instruction** - Generates execution instruction
+5. **Execute transaction** - Signs and submits to network
+
+### 🚫 Interactive Rejection System (`reject.ts`)
+
+Advanced proposal rejection with member and proposal selection.
+
+**Key Features:**
+- **Active proposal detection** - Finds non-stale, active proposals
+- **Interactive selection** - Choose specific proposals to reject
+- **Member selection** - Pick which member signs the rejection
+- **Status validation** - Only allows rejection of active/approved proposals
+
+**Rejection Process:**
+```typescript
+// Find active proposals
+const activeProposals = await getActiveProposals(multisigAddress);
+
+// Filter for rejectable proposals
+if (!isStale && (status === 'Active' || status === 'Approved')) {
+  activeProposals.push({
+    index: i,
+    pda: proposalPda,
+    status: status,
+    approvedCount: proposalResult.data.approved.length,
+    rejectedCount: proposalResult.data.rejected.length,
+    cancelledCount: proposalResult.data.cancelled.length,
+  });
 }
 ```
 
-#### Transaction Execution
+**Rejection Workflow:**
+1. **Scan proposals** - Finds all active proposals
+2. **Display options** - Shows available proposals with vote counts
+3. **Select proposal** - User chooses which to reject
+4. **Choose member** - Select signing member
+5. **Confirm action** - User confirms rejection
+6. **Execute rejection** - Signs and submits rejection transaction
+
+### ❌ Stale Proposal Cancellation (`cancel.ts`)
+
+Automated cleanup of stale proposals to free up resources.
+
+**Cancellation Features:**
+- **Stale detection** - Identifies proposals below stale transaction index
+- **Batch processing** - Handles multiple cancellations efficiently
+- **Error resilience** - Continues processing even if individual cancellations fail
+- **Progress tracking** - Shows cancellation status for each proposal
+
+**Stale Detection Logic:**
+```typescript
+// Check if proposal is stale
+const isStale = i < Number(multisigAccount.data.staleTransactionIndex || 0);
+
+// Only cancel stale proposals
+if (isStale) {
+  proposalsToCancel.push({
+    index: i,
+    pda: proposalPda,
+    status: 'Stale',
+  });
+}
+```
+
+**Cancellation Workflow:**
+1. **Load multisig data** - Gets current and stale transaction indices
+2. **Scan transactions** - Finds all stale proposals
+3. **Batch cancellation** - Processes all stale proposals
+4. **Error handling** - Continues on individual failures
+5. **Progress reporting** - Shows results for each cancellation
+
+### 🧹 Interactive Account Cleanup (`close.ts`)
+
+Comprehensive transaction cleanup with interactive selection.
+
+**Cleanup Features:**
+- **Multi-status detection** - Finds stale, cancelled, executed, and rejected transactions
+- **Interactive selection** - Choose specific transactions or close all
+- **Member selection** - Pick which member signs close transactions
+- **Rent recovery** - Reclaims SOL from closed accounts
+
+**Closable Transaction Detection:**
+```typescript
+// Can close if: stale, cancelled, executed, or rejected
+const canClose = isStale || 
+                 status === 'Cancelled' || 
+                 status === 'Executed' || 
+                 status === 'Rejected';
+```
+
+**Cleanup Workflow:**
+1. **Scan transactions** - Finds all closable transactions
+2. **Display options** - Shows transaction status and details
+3. **Select transactions** - User chooses which to close
+4. **Choose member** - Select signing member
+5. **Confirm action** - User confirms cleanup
+6. **Execute cleanup** - Closes selected transactions
+
+### ⚙️ Controlled Multisig Configuration (`config.ts`)
+
+Direct multisig configuration management for controlled multisigs (no voting required).
+
+**Configuration Features:**
+- **Direct management** - No voting required for config changes
+- **Member management** - Add/remove members with custom permissions
+- **Spending limits** - Create and manage token spending limits
+- **Rent collector** - Set account for rent collection
+- **Interactive interface** - User-friendly configuration menu
+
+**Available Operations:**
+```typescript
+1. AddMember - Add new members with custom permissions
+2. RemoveMember - Remove existing members
+3. SetRentCollector - Configure rent collection
+4. AddSpendingLimit - Create token spending limits
+5. RemoveSpendingLimit - Remove spending limits
+6. ViewInfo - Display current configuration
+7. Exit - Exit the config tool
+```
+
+**Member Permission System:**
+```typescript
+// Permission bitmask system
+const permissions = {
+  mask: 7  // 0b111 = All permissions
+  // Bit 0: Propose permission
+  // Bit 1: Vote permission  
+  // Bit 2: Execute permission
+};
+
+// Common permission combinations
+const PROPOSE_ONLY = 1;  // 0b001
+const VOTE_ONLY = 2;     // 0b010
+const EXECUTE_ONLY = 4;  // 0b100
+const ALL_PERMISSIONS = 7; // 0b111
+```
+
+**Spending Limit Creation:**
+```typescript
+const instruction = getMultisigAddSpendingLimitInstruction({
+  multisig: address(multisigPda),
+  configAuthority: signer,
+  spendingLimit: address(spendingLimitPda),
+  rentPayer: signer,
+  systemProgram: address('11111111111111111111111111111111'),
+  createKey: address(createKeyAddress),
+  vaultIndex,
+  mint: address(mint),
+  amount,
+  period,
+  members: members.map(addr => address(addr)),
+  destinations: destinations.map(addr => address(addr)),
+  memo: memo || null
+});
+```
+
+
+### 📊 Comprehensive Information Dashboard (`info.ts`)
+
+Advanced multisig monitoring and analysis system.
+
+**Dashboard Features:**
+- **Real-time vault balances** - SOL and USDC holdings
+- **Member analysis** - Permission breakdown and role identification
+- **Transaction history** - Complete transaction lifecycle tracking
+- **Status monitoring** - Active, approved, executed, rejected transactions
+
+**Transaction Analysis:**
+```typescript
+// Comprehensive transaction status tracking
+const transactions = await Promise.all(
+  Array.from({ length: lastTransactionIndex }, (_, i) => 
+    fetchTransactionInfo(multisigAddress, i + 1)
+  )
+);
+
+// Status categorization
+const activeTransactions = transactions.filter(tx => tx.status === 'Active' && !tx.isStale);
+const approvedTransactions = transactions.filter(tx => tx.status === 'Approved' && !tx.isStale);
+const executedTransactions = transactions.filter(tx => tx.status === 'Executed');
+```
+
+### @solana/kit Integration
+
+Unified API for all Solana operations:
 
 ```typescript
-// Secure transaction execution
-const executeInstruction = getVaultTransactionExecuteInstruction({
+// Transaction preparation with @solana/kit
+const transaction = await prepareTransaction(
+  [instruction as Instruction<string>],
+  payerAddress
+);
+
+// Transaction signing
+const signedTransaction = await signTransaction(
+  [signer],
+  transaction
+);
+
+// Transaction sending
+const signature = await sendTransaction(wireTransaction);
+```
+
+```typescript
+// PDA derivation for multisig operations
+const [multisigPda] = await getMultisigPda(createKey);
+const [vaultPda] = await getVaultPda(multisigPda, 0);
+const [proposalPda] = await getProposalPda(multisigPda, transactionIndex);
+
+// Permission-based multisig operations
+const instruction = getProposalApproveInstruction({
   multisig: address(multisigPda),
   proposal: address(proposalPda),
-  transaction: address(transactionPda),
-  member: await createSignerFromKeyPair(executor)
+  member: await createSignerFromKeyPair(voter),
+  args: { memo: `Approved by ${voterAddress}` }
 });
-```
-
-### Stage 5: Account Cleanup (`close.ts`)
-
-The cleanup system implements automated rent recovery and account management.
-
-#### Stale Transaction Detection
-
-```typescript
-// Advanced stale transaction detection
-const multisigInfo = await getMultisigInfo(multisigAddress);
-const staleIndex = multisigInfo.staleTransactionIndex || 0;
-
-// Scan for stale transactions
-for (let i = 1; i <= Number(multisigInfo.transactionIndex); i++) {
-  const [transactionPda] = await getVaultTransactionPda(multisigAddress, BigInt(i));
-  const transactionInfo = await getTransactionInfo(transactionPda);
-  
-  if (i < Number(staleIndex) && transactionInfo.isStale) {
-    await closeTransactionAccount(transactionPda, multisigAddress);
-  }
-}
-```
-
-## 🔧 Advanced Features
-
-### Type-Safe Configuration Management
-
-The system implements comprehensive type safety throughout:
-
-```typescript
-// Strongly typed configuration
-interface ConfigData {
-  proposer: WalletData;
-  voter1: WalletData;
-  voter2: WalletData;
-  multisigAddress: string;
-}
-
-interface WalletData {
-  privateKey: string;  // Base64 encoded for security
-  publicKey: string;
-}
-```
-
-### Priority Fee Optimization
-
-The system includes intelligent priority fee estimation:
-
-```typescript
-// Dynamic priority fee calculation
-async function getPriorityFeeEstimate(): Promise<number> {
-  const recentFees = await rpc.getRecentPrioritizationFees().send();
-  const medianFee = calculateMedian(recentFees);
-  return Math.min(Math.max(medianFee, MIN_FEE), MAX_FEE);
-}
-```
-
-### Comprehensive Error Handling
-
-All operations include robust error handling:
-
-```typescript
-// Type-safe error handling
-try {
-  await executeTransaction(instructions, signers);
-} catch (error) {
-  if (error instanceof SendTransactionError) {
-    console.error('Transaction failed:', error.logs);
-  } else if (error instanceof RpcError) {
-    console.error('RPC error:', error.message);
-  }
-  throw error;
-}
 ```
 
 ## 🛡️ Security Considerations
@@ -326,43 +490,6 @@ try {
 - **Transaction confirmation** with configurable commitment levels
 - **Rate limiting** and retry mechanisms for RPC calls
 
-## 🔗 Technology Integration
-
-### Solana Kit Integration
-- **Unified API** for all Solana operations
-- **Type-safe** instruction building and transaction creation
-- **Automatic serialization** of complex data structures
-- **Built-in retry logic** for network operations
-
-### Squads SDK Integration
-- **Program-derived addresses** (PDAs) for secure account management
-- **Permission-based** multisig operations
-- **Vault transaction** handling with proper account derivation
-- **Proposal lifecycle** management with state validation
-
-### Codama Integration
-- **Automated client generation** from Anchor IDLs
-- **Type-safe** program interaction methods
-- **Runtime validation** of instruction parameters
-- **Version management** for program updates
-
-## 📊 Performance Optimizations
-
-### Transaction Batching
-- **Instruction batching** for multiple operations
-- **Priority fee optimization** based on network conditions
-- **Compute unit estimation** for accurate fee calculation
-
-### Memory Management
-- **Efficient account scanning** for cleanup operations
-- **Lazy loading** of multisig information
-- **Garbage collection** for temporary objects
-
-### Network Optimization
-- **Connection pooling** for RPC operations
-- **Request deduplication** to reduce network calls
-- **Caching strategies** for frequently accessed data
-
 ## 🎯 Use Cases
 
 ### Treasury Management
@@ -372,27 +499,22 @@ try {
 
 ### Governance Operations
 - **Proposal creation** and voting mechanisms
-- **Parameter updates** with multisig approval
-- **Emergency procedures** with fast-track approval
 
 ### Program Upgrades
 - **Code deployment** with multisig validation
-- **Configuration updates** with proper testing
-- **Security patches** with emergency procedures
 
 ## 🔗 Resources
 
 - **[Squads v4 Documentation](https://v4-sdk-typedoc.vercel.app/)** - Complete SDK reference
 - **[Solana Kit Documentation](https://solana-kit.com/)** - Modern Solana development
 - **[Codama Documentation](https://codama.idl.dev/)** - IDL client generation
-- **[Solana Program Library](https://spl.solana.com/)** - Standard program interfaces
 
 ## ⚠️ Important Notes
 
 **This system is designed for development and testing environments only.**
 
 - ✅ Use devnet SOL and USDC from official faucets
-- ✅ Never use mainnet keys or real funds in development
+- ✅ Never use mainnet keys or real funds with development keys
 - ✅ Generated keypairs are for testing purposes only
 - ✅ All operations are performed on Solana devnet
 
@@ -403,5 +525,3 @@ This system demonstrates advanced Solana development patterns and can serve as a
 - **Treasury management systems**
 - **Governance platforms**
 - **DeFi protocol integrations**
-
-For questions or contributions, please refer to the official documentation of the underlying technologies.

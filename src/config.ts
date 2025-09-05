@@ -1,268 +1,278 @@
-import { sleep } from 'bun';
 import { 
-  getConfigTransactionCreateInstruction,
-  getConfigTransactionExecuteInstruction,
+  getMultisigAddMemberInstruction,
+  getMultisigRemoveMemberInstruction,
+  getMultisigSetRentCollectorInstruction,
+  getMultisigAddSpendingLimitInstruction,
+  getMultisigRemoveSpendingLimitInstruction,
   fetchMultisig,
-  getTransactionPda,
-  getProposalPda,
+  getSpendingLimitPda,
 } from './utils/squads/index';
 import { 
   address, 
   createSignerFromKeyPair,
   getAddressFromPublicKey,
-  type TransactionSigner
+  generateKeyPair,
 } from '@solana/kit';
 import { loadWalletFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
-import { prompt, promptWalletChoice, promptYesNo } from './utils/prompt';
+import { prompt } from './utils/prompt';
 import { signAndSendTransaction } from './utils/sign';
 import { rpc } from './utils/rpc';
-import { configAction, type ConfigActionArgs } from './utils/squads/types/configAction';
 import { type MemberArgs } from './utils/squads/types/member';
 import { type PeriodArgs } from './utils/squads/types/period';
 
-// ConfigTransactionCreate
-// It changes the config of the multisig
-
-// https://docs.squads.so/main/development/typescript/instructions/create-config-transaction
-
-async function createConfigTransaction(
-  creator: CryptoKeyPair,
+async function addMember(
+  manager: CryptoKeyPair,
   multisigPda: string,
-  actions: ConfigActionArgs[],
+  newMemberAddress: string,
+  permissions: number,
   memo?: string
 ): Promise<void> {
-  console.log('\n⚙️  Creating config transaction...');
+  console.log('\n👥 Adding new member...');
   
   try {
-    // Get the next transaction index
-    const multisigAccount = await fetchMultisig(rpc, address(multisigPda));
-    const currentTransactionIndex = Number(multisigAccount.data.transactionIndex);
-    const newTransactionIndex = BigInt(currentTransactionIndex + 1);
+    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
+    const signer = await createSignerFromKeyPair(manager);
     
-    // Get the transaction PDA
-    const [transactionPda] = await getTransactionPda(multisigPda, newTransactionIndex);
-    const creatorAddress = await getAddressFromPublicKey(creator.publicKey);
-    const signer = await createSignerFromKeyPair(creator);
+    const memberArgs: MemberArgs = {
+      key: address(newMemberAddress),
+      permissions: { mask: permissions }
+    };
     
-    console.log(`📋 Multisig Address: ${multisigPda}`);
-    console.log(`📋 Transaction Address: ${transactionPda}`);
-    console.log(`📋 Transaction Index: ${newTransactionIndex}`);
-    console.log(`👤 Creator: ${creatorAddress}`);
-    console.log(`🔧 Actions: ${actions.length} config action(s)`);
-    
-    // Create config transaction instruction
-    const configTransactionIx = getConfigTransactionCreateInstruction({
+    const instruction = getMultisigAddMemberInstruction({
       multisig: address(multisigPda),
-      transaction: address(transactionPda),
-      creator: signer,
+      configAuthority: signer,
       rentPayer: signer,
-      actions,
-      memo: memo || null,
+      systemProgram: address('11111111111111111111111111111111'),
+      newMember: memberArgs,
+      memo: memo || null
     });
     
-    console.log('📤 Creating config transaction...');
+    console.log(`📋 Adding member: ${newMemberAddress}`);
+    console.log(`🔑 Permissions: ${permissions} (0b${permissions.toString(2).padStart(3, '0')})`);
+    
     const signature = await signAndSendTransaction(
-      [configTransactionIx],
-      [creator],
-      creatorAddress
+      [instruction],
+      [manager],
+      managerAddress
     );
     
-    console.log(`✅ Config transaction created: ${signature}`);
-    console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
-    
-    await sleep(2000); // Wait for account initialization
-    
-    // Get the proposal PDA
-    const [proposalPda] = await getProposalPda(multisigPda, newTransactionIndex);
-    
-    console.log(`\n🎉 Config transaction created successfully!`);
-    console.log(`🔗 Transaction: ${signature}`);
-    console.log(`📋 Transaction Index: ${newTransactionIndex}`);
-    console.log(`📋 Proposal PDA: ${proposalPda}`);
-    console.log(`\n📋 Next steps:`);
-    console.log(`   1. Members need to vote on this proposal to execute the config changes`);
-    console.log(`   2. Once approved, the config changes will be executed automatically`);
-    console.log(`   3. Check proposal status using the transaction index: ${newTransactionIndex}`);
+    console.log(`✅ Member added successfully!`);
+    console.log(`🔗 Transaction: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
     
   } catch (error) {
-    console.error('❌ Error creating config transaction:', error);
-    if (error && typeof error === 'object' && 'logs' in error) {
-      console.error('Transaction logs:', (error as any).logs);
-    }
+    console.error('❌ Error adding member:', error);
     throw error;
   }
 }
 
-async function executeConfigTransaction(
-  executor: CryptoKeyPair,
+async function removeMember(
+  manager: CryptoKeyPair,
   multisigPda: string,
-  transactionIndex: bigint
+  memberAddress: string,
+  memo?: string
 ): Promise<void> {
-  console.log('\n🚀 Executing config transaction...');
+  console.log('\n👥 Removing member...');
   
   try {
-    // Get the proposal and transaction PDAs
-    const [proposalPda] = await getProposalPda(multisigPda, transactionIndex);
-    const [transactionPda] = await getTransactionPda(multisigPda, transactionIndex);
-    const executorAddress = await getAddressFromPublicKey(executor.publicKey);
-    const signer = await createSignerFromKeyPair(executor);
+    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
+    const signer = await createSignerFromKeyPair(manager);
     
-    console.log(`📋 Multisig Address: ${multisigPda}`);
-    console.log(`📋 Proposal Address: ${proposalPda}`);
-    console.log(`📋 Transaction Address: ${transactionPda}`);
-    console.log(`📋 Transaction Index: ${transactionIndex}`);
-    console.log(`👤 Executor: ${executorAddress}`);
-    
-    // Create execution instruction
-    const executeInstruction = getConfigTransactionExecuteInstruction({
+    const instruction = getMultisigRemoveMemberInstruction({
       multisig: address(multisigPda),
-      proposal: address(proposalPda),
-      transaction: address(transactionPda),
-      member: signer,
+      configAuthority: signer,
       rentPayer: signer,
+      systemProgram: address('11111111111111111111111111111111'),
+      oldMember: address(memberAddress),
+      memo: memo || null
     });
     
-    console.log('📤 Sending execution transaction...');
+    console.log(`📋 Removing member: ${memberAddress}`);
+    
     const signature = await signAndSendTransaction(
-      [executeInstruction],
-      [executor],
-      executorAddress
+      [instruction],
+      [manager],
+      managerAddress
     );
     
-    console.log(`✅ Config transaction executed successfully!`);
-    console.log(`🔗 Transaction: ${signature}`);
-    console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+    console.log(`✅ Member removed successfully!`);
+    console.log(`🔗 Transaction: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
     
   } catch (error) {
-    console.error('❌ Execution failed:', error);
+    console.error('❌ Error removing member:', error);
     throw error;
   }
 }
 
-async function promptConfigActions(): Promise<ConfigActionArgs[]> {
-  const actions: ConfigActionArgs[] = [];
+
+async function addSpendingLimit(
+  manager: CryptoKeyPair,
+  multisigPda: string,
+  vaultIndex: number,
+  mint: string,
+  amount: bigint,
+  period: PeriodArgs,
+  members: string[],
+  destinations: string[],
+  memo?: string
+): Promise<void> {
+  console.log('\n💰 Adding spending limit...');
   
-  console.log('\n🔧 Config Actions Available:');
-  console.log('1. AddMember - Add a new member to the multisig');
-  console.log('2. RemoveMember - Remove a member from the multisig');
-  console.log('3. ChangeThreshold - Change the approval threshold');
-  console.log('4. SetTimeLock - Set the time lock period');
-  console.log('5. AddSpendingLimit - Add a spending limit');
-  console.log('6. RemoveSpendingLimit - Remove a spending limit');
-  console.log('7. SetRentCollector - Set the rent collector');
-  console.log('8. Done - Finish adding actions');
-  
-  while (true) {
-    const choice = await prompt('\nSelect an action (1-8): ');
+  try {
+    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
+    const signer = await createSignerFromKeyPair(manager);
     
-    switch (choice) {
-      case '1': // AddMember
-        const memberKey = await prompt('Enter new member public key: ');
-        const memberPermissions = await prompt('Enter permissions (Proposer/Executor/Voter): ');
-        const memberPermissionsEnum = memberPermissions.toLowerCase() === 'executor' ? 'Executor' : 
-                                    memberPermissions.toLowerCase() === 'voter' ? 'Voter' : 'Proposer';
-        
-        const newMember: MemberArgs = {
-          key: address(memberKey),
-          permissions: memberPermissionsEnum as any,
-        };
-        
-        actions.push(configAction('AddMember', { newMember }));
-        console.log(`✅ Added AddMember action for ${memberKey}`);
-        break;
-        
-      case '2': // RemoveMember
-        const oldMemberKey = await prompt('Enter member public key to remove: ');
-        actions.push(configAction('RemoveMember', { oldMember: address(oldMemberKey) }));
-        console.log(`✅ Added RemoveMember action for ${oldMemberKey}`);
-        break;
-        
-      case '3': // ChangeThreshold
-        const thresholdInput = await prompt('Enter new threshold (number): ');
-        const newThreshold = parseInt(thresholdInput);
-        if (isNaN(newThreshold) || newThreshold <= 0) {
-          console.log('❌ Invalid threshold. Please enter a positive number.');
-          continue;
-        }
-        actions.push(configAction('ChangeThreshold', { newThreshold }));
-        console.log(`✅ Added ChangeThreshold action: ${newThreshold}`);
-        break;
-        
-      case '4': // SetTimeLock
-        const timeLockInput = await prompt('Enter new time lock in seconds: ');
-        const newTimeLock = parseInt(timeLockInput);
-        if (isNaN(newTimeLock) || newTimeLock < 0) {
-          console.log('❌ Invalid time lock. Please enter a non-negative number.');
-          continue;
-        }
-        actions.push(configAction('SetTimeLock', { newTimeLock }));
-        console.log(`✅ Added SetTimeLock action: ${newTimeLock} seconds`);
-        break;
-        
-      case '5': // AddSpendingLimit
-        const createKey = await prompt('Enter create key for spending limit: ');
-        const vaultIndexInput = await prompt('Enter vault index: ');
-        const vaultIndex = parseInt(vaultIndexInput);
-        const mint = await prompt('Enter token mint address: ');
-        const amountInput = await prompt('Enter spending limit amount: ');
-        const amount = BigInt(amountInput);
-        const periodType = await prompt('Enter period type (OneTime/Day/Week/Month): ');
-        const periodTypeEnum = periodType.toLowerCase() === 'onetime' ? 0 :
-                              periodType.toLowerCase() === 'day' ? 1 :
-                              periodType.toLowerCase() === 'week' ? 2 : 3;
-        
-        const membersInput = await prompt('Enter member addresses (comma-separated): ');
-        const members = membersInput.split(',').map(addr => address(addr.trim()));
-        
-        const destinationsInput = await prompt('Enter destination addresses (comma-separated, or press Enter for any): ');
-        const destinations = destinationsInput.trim() ? 
-          destinationsInput.split(',').map(addr => address(addr.trim())) : [];
-        
-        const periodData: PeriodArgs = periodTypeEnum;
-        
-        actions.push(configAction('AddSpendingLimit', {
-          createKey: address(createKey),
-          vaultIndex,
-          mint: address(mint),
-          amount,
-          period: periodData,
-          members,
-          destinations,
-        }));
-        console.log(`✅ Added AddSpendingLimit action`);
-        break;
-        
-      case '6': // RemoveSpendingLimit
-        const spendingLimitKey = await prompt('Enter spending limit address to remove: ');
-        actions.push(configAction('RemoveSpendingLimit', { spendingLimit: address(spendingLimitKey) }));
-        console.log(`✅ Added RemoveSpendingLimit action for ${spendingLimitKey}`);
-        break;
-        
-      case '7': // SetRentCollector
-        const rentCollectorInput = await prompt('Enter rent collector address (or press Enter for null): ');
-        const newRentCollector = rentCollectorInput.trim() ? address(rentCollectorInput) : null;
-        actions.push(configAction('SetRentCollector', { newRentCollector }));
-        console.log(`✅ Added SetRentCollector action: ${newRentCollector || 'null'}`);
-        break;
-        
-      case '8': // Done
-        if (actions.length === 0) {
-          console.log('❌ No actions added. Please add at least one action.');
-          continue;
-        }
-        return actions;
-        
-      default:
-        console.log('❌ Invalid choice. Please select 1-8.');
-        break;
-    }
+    // Generate a random key for the spending limit
+    const createKey = await generateKeyPair();
+    const createKeyAddress = await getAddressFromPublicKey(createKey.publicKey);
+    
+    // Get spending limit PDA
+    const [spendingLimitPda] = await getSpendingLimitPda(multisigPda, address(createKeyAddress), 0);
+    
+    const instruction = getMultisigAddSpendingLimitInstruction({
+      multisig: address(multisigPda),
+      configAuthority: signer,
+      spendingLimit: address(spendingLimitPda),
+      rentPayer: signer,
+      systemProgram: address('11111111111111111111111111111111'),
+      createKey: address(createKeyAddress),
+      vaultIndex,
+      mint: address(mint),
+      amount,
+      period,
+      members: members.map(addr => address(addr)),
+      destinations: destinations.map(addr => address(addr)),
+      memo: memo || null
+    });
+    
+    console.log(`📋 Vault Index: ${vaultIndex}`);
+    console.log(`🪙 Mint: ${mint}`);
+    console.log(`💰 Amount: ${amount}`);
+    console.log(`👥 Members: ${members.length}`);
+    console.log(`🎯 Destinations: ${destinations.length}`);
+    
+    const signature = await signAndSendTransaction(
+      [instruction],
+      [manager],
+      managerAddress
+    );
+    
+    console.log(`✅ Spending limit added successfully!`);
+    console.log(`🔗 Transaction: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+    
+  } catch (error) {
+    console.error('❌ Error adding spending limit:', error);
+    throw error;
+  }
+}
+
+async function removeSpendingLimit(
+  manager: CryptoKeyPair,
+  multisigPda: string,
+  spendingLimitAddress: string,
+  memo?: string
+): Promise<void> {
+  console.log('\n💰 Removing spending limit...');
+  
+  try {
+    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
+    const signer = await createSignerFromKeyPair(manager);
+    
+    const instruction = getMultisigRemoveSpendingLimitInstruction({
+      multisig: address(multisigPda),
+      configAuthority: signer,
+      spendingLimit: address(spendingLimitAddress),
+      rentCollector: address(managerAddress),
+      memo: memo || null
+    });
+    
+    console.log(`📋 Removing spending limit: ${spendingLimitAddress}`);
+    
+    const signature = await signAndSendTransaction(
+      [instruction],
+      [manager],
+      managerAddress
+    );
+    
+    console.log(`✅ Spending limit removed successfully!`);
+    console.log(`🔗 Transaction: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+    
+  } catch (error) {
+    console.error('❌ Error removing spending limit:', error);
+    throw error;
+  }
+}
+
+async function setRentCollector(
+  manager: CryptoKeyPair,
+  multisigPda: string,
+  rentCollectorAddress: string,
+  memo?: string
+): Promise<void> {
+  console.log('\n🏦 Setting rent collector...');
+  
+  try {
+    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
+    const signer = await createSignerFromKeyPair(manager);
+    
+    const instruction = getMultisigSetRentCollectorInstruction({
+      multisig: address(multisigPda),
+      configAuthority: signer,
+      rentPayer: signer,
+      systemProgram: address('11111111111111111111111111111111'),
+      rentCollector: address(rentCollectorAddress),
+      memo: memo || null
+    });
+    
+    console.log(`📋 Setting rent collector: ${rentCollectorAddress}`);
+    
+    const signature = await signAndSendTransaction(
+      [instruction],
+      [manager],
+      managerAddress
+    );
+    
+    console.log(`✅ Rent collector set successfully!`);
+    console.log(`🔗 Transaction: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
+    
+  } catch (error) {
+    console.error('❌ Error setting rent collector:', error);
+    throw error;
+  }
+}
+
+async function displayMultisigInfo(multisigPda: string): Promise<void> {
+  console.log('\n📊 Current Multisig Information');
+  console.log('==============================');
+  
+  try {
+    const multisigAccount = await fetchMultisig(rpc, address(multisigPda));
+    
+    console.log(`🏛️  Multisig Address: ${multisigPda}`);
+    console.log(`🎯 Threshold: ${multisigAccount.data.threshold}`);
+    console.log(`⏰ Time Lock: ${multisigAccount.data.timeLock} seconds`);
+    console.log(`👥 Members: ${multisigAccount.data.members.length}`);
+    console.log(`💰 Rent Collector: ${multisigAccount.data.rentCollector?.toString() || 'None'}`);
+    
+    console.log('\n👥 Current Members:');
+    multisigAccount.data.members.forEach((member, index) => {
+      const permissions = member.permissions.mask;
+      const canPropose = (permissions & 1) !== 0;
+      const canVote = (permissions & 2) !== 0;
+      const canExecute = (permissions & 4) !== 0;
+      
+      console.log(`   ${index + 1}. ${member.key.toString()}`);
+      console.log(`      Permissions: ${canPropose ? 'Propose' : ''} ${canVote ? 'Vote' : ''} ${canExecute ? 'Execute' : ''}`);
+    });
+    
+  } catch (error) {
+    console.error('❌ Error fetching multisig info:', error);
   }
 }
 
 async function main() {
   try {
-    console.log('⚙️  Squads Config Transaction Tool');
+    console.log('⚙️  Squads Config Management Tool');
     console.log('==================================\n');
     
     // Load multisig address from config
@@ -270,75 +280,108 @@ async function main() {
     const multisigAddress = await loadMultisigAddressFromConfig();
     console.log(`🏛️  Multisig Address: ${multisigAddress}`);
     
-    // Get multisig info
-    const multisigAccount = await fetchMultisig(rpc, address(multisigAddress));
-    console.log(`👥 Members: ${multisigAccount.data.members.length}`);
-    console.log(`🗳️  Threshold: ${multisigAccount.data.threshold}`);
-    console.log(`📊 Transaction Index: ${multisigAccount.data.transactionIndex}`);
+    // Load manager wallet
+    console.log('✅ Loading manager wallet...');
+    const manager = await loadWalletFromConfig('manager');
+    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
+    console.log(`👤 Manager: ${managerAddress}`);
     
-    // Ask user what they want to do
-    console.log('\nWhat would you like to do?');
-    console.log('1. Create a new config transaction');
-    console.log('2. Execute an existing config transaction');
+    // Display current multisig info
+    await displayMultisigInfo(multisigAddress);
     
-    const action = await prompt('Select action (1-2): ');
-    
-    if (action === '1') {
-      // Create config transaction
-      console.log('Note: Only Creator and Executor can create config transactions');
-      const creatorChoice = await promptWalletChoice('Which wallet to use as creator?');
-      const creator = await loadWalletFromConfig(creatorChoice);
-      const creatorAddress = await getAddressFromPublicKey(creator.publicKey);
-      console.log(`👤 Using ${creatorChoice === 'manager' ? 'Manager' : creatorChoice === 'voter1' ? 'Voter1' : 'Voter2'} as Creator: ${creatorAddress}`);
+    while (true) {
+      console.log('\n🔧 Controlled Multisig Instructions:');
+      console.log('1. AddMember - Add a new member to the multisig');
+      console.log('2. RemoveMember - Remove a member from the multisig');
+      console.log('3. SetRentCollector - Set the rent collector');
+      console.log('4. AddSpendingLimit - Add a spending limit');
+      console.log('5. RemoveSpendingLimit - Remove a spending limit');
+      console.log('6. ViewInfo - Display current multisig information');
+      console.log('7. Exit - Exit the config tool');
       
-      // Get config actions
-      const actions = await promptConfigActions();
+      const choice = await prompt('\nSelect an action (1-7): ');
       
-      // Get memo
-      const memo = await prompt('Enter memo (optional): ');
-      
-      // Confirm transaction
-      console.log('\n📋 Config Transaction Summary:');
-      console.log(`👤 Creator: ${creatorAddress}`);
-      console.log(`🏛️  Multisig: ${multisigAddress}`);
-      console.log(`🔧 Actions: ${actions.length} action(s)`);
-      console.log(`📝 Memo: ${memo || 'None'}`);
-      
-      const confirm = await promptYesNo('Proceed with config transaction?');
-      if (!confirm) {
-        console.log('❌ Config transaction cancelled.');
-        return;
+      switch (choice) {
+        case '1': {
+          const memberAddress = await prompt('Enter new member address: ');
+          const permissionsChoice = await prompt('Enter permissions (1=propose, 2=vote, 4=execute, 7=all): ');
+          const permissions = parseInt(permissionsChoice) || 7;
+          const memo = await prompt('Enter memo (optional): ');
+          
+          await addMember(manager, multisigAddress, memberAddress, permissions, memo);
+          break;
+        }
+        
+        case '2': {
+          const memberAddress = await prompt('Enter member address to remove: ');
+          const memo = await prompt('Enter memo (optional): ');
+          
+          await removeMember(manager, multisigAddress, memberAddress, memo);
+          break;
+        }
+        
+        case '3': {
+          const rentCollectorAddress = await prompt('Enter rent collector address: ');
+          const memo = await prompt('Enter memo (optional): ');
+          
+          await setRentCollector(manager, multisigAddress, rentCollectorAddress, memo);
+          break;
+        }
+        
+        case '4': {
+          const vaultIndex = await prompt('Enter vault index (0): ');
+          const mint = await prompt('Enter mint address: ');
+          const amount = await prompt('Enter amount (in smallest units): ');
+          const periodType = await prompt('Enter period type (1=OneTime, 2=Day, 3=Week, 4=Month): ');
+          const membersInput = await prompt('Enter member addresses (comma-separated): ');
+          const destinationsInput = await prompt('Enter destination addresses (comma-separated, empty for any): ');
+          const memo = await prompt('Enter memo (optional): ');
+          
+          const period: PeriodArgs = {
+            __kind: periodType === '1' ? 'OneTime' : 
+                   periodType === '2' ? 'Day' : 
+                   periodType === '3' ? 'Week' : 'Month'
+          } as unknown as PeriodArgs;
+          
+          const members = membersInput.split(',').map(addr => addr.trim()).filter(addr => addr);
+          const destinations = destinationsInput.split(',').map(addr => addr.trim()).filter(addr => addr);
+          
+          await addSpendingLimit(
+            manager, 
+            multisigAddress, 
+            parseInt(vaultIndex), 
+            mint, 
+            BigInt(amount), 
+            period, 
+            members, 
+            destinations, 
+            memo
+          );
+          break;
+        }
+        
+        case '5': {
+          const spendingLimitAddress = await prompt('Enter spending limit address to remove: ');
+          const memo = await prompt('Enter memo (optional): ');
+          
+          await removeSpendingLimit(manager, multisigAddress, spendingLimitAddress, memo);
+          break;
+        }
+        
+        case '6': {
+          await displayMultisigInfo(multisigAddress);
+          break;
+        }
+        
+        case '7': {
+          console.log('\n👋 Exiting config tool...');
+          return;
+        }
+        
+        default:
+          console.log('❌ Invalid choice. Please select 1-7.');
       }
-      
-      // Create the config transaction
-      await createConfigTransaction(creator, multisigAddress, actions, memo);
-      
-    } else if (action === '2') {
-      // Execute config transaction
-      const transactionIndexInput = await prompt('Enter transaction index to execute: ');
-      const transactionIndex = BigInt(transactionIndexInput);
-      
-      console.log('Note: Only Creator and Executor can execute config transactions');
-      const executorChoice = await promptWalletChoice('Which wallet to use for execution?');
-      const executor = await loadWalletFromConfig(executorChoice);
-      const executorAddress = await getAddressFromPublicKey(executor.publicKey);
-      console.log(`👤 Using ${executorChoice === 'manager' ? 'Manager' : executorChoice === 'voter1' ? 'Voter1' : 'Voter2'} as Executor: ${executorAddress}`);
-      
-      const confirm = await promptYesNo('Are you sure you want to execute this config transaction?');
-      if (!confirm) {
-        console.log('❌ Execution cancelled by user.');
-        return;
-      }
-      
-      // Execute the config transaction
-      await executeConfigTransaction(executor, multisigAddress, transactionIndex);
-      
-    } else {
-      console.log('❌ Invalid choice. Please select 1 or 2.');
-      return;
     }
-    
-    console.log('\n🎉 Operation completed successfully!');
     
   } catch (error) {
     console.error('❌ Error:', error);
@@ -348,12 +391,6 @@ async function main() {
     process.exit(1);
   }
 }
-
-// Handle process termination
-process.on('SIGINT', () => {
-  console.log('\n👋 Goodbye!');
-  process.exit(0);
-});
 
 export { main };
 

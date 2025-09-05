@@ -18,9 +18,9 @@ async function sendRawTransaction(wireTransaction: Base64EncodedWireTransaction)
  * Confirms a transaction signature using retry-based polling approach
  */
 async function confirmSignature(signature: Signature): Promise<string> {
-  const MAX_RETRIES = 5;
-  const RETRY_INTERVAL = 1000; // 500ms between retries
-  const TIMEOUT_DURATION = 6000; // 2 seconds total timeout
+  const MAX_RETRIES = 7;
+  const RETRY_INTERVAL = 1000; // 1000ms between retries
+  const TIMEOUT_DURATION = 8000; // 8 seconds total timeout
   
   console.log(`Starting confirmation for signature: ${signature}`);
   
@@ -38,9 +38,7 @@ async function confirmSignature(signature: Signature): Promise<string> {
     const checkConfirmation = async () => {
       if (isResolved) return;
       
-      try {
-        console.log(`Checking confirmation for ${signature} (attempt ${retryCount + 1}/${MAX_RETRIES})`);
-        
+      try {        
         const tx = await rpc.getTransaction(signature, {
           commitment: 'confirmed',
           encoding: 'jsonParsed',

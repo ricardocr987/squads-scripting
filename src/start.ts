@@ -10,7 +10,8 @@ import {
   createSignerFromKeyPair,
   generateKeyPair,
   getAddressFromPublicKey,
-  type Address
+  type Address,
+  lamports
 } from '@solana/kit';
 import { transferInstruction } from './utils/transfer';
 import { 
@@ -23,45 +24,58 @@ import {
   generateManagerVoterWallets,
 } from './utils/wallet';
 import { prompt } from './utils/prompt';
-import { signAndSendTransaction } from './utils/sign';
+import { prepareTransaction } from './utils/prepare';
+import { sendTransaction } from './utils/send';
+import { signTransaction, getBase64EncodedWireTransaction, type Instruction } from '@solana/kit';
 import { checkSolBalance } from './utils/balance';
 
 // USDC mint address on devnet
 import { USDC_MINT_DEVNET as USDC_MINT } from './utils/constants';
 import { rpc } from './utils/rpc';
 
-async function requestUserToSendSOL(manager: Address): Promise<void> {
-  console.log('\n💰 SOL Funding Required');
-  console.log('========================\n');
-  
-  console.log('📍 Manager Wallet Address:', manager);
+async function requestSOLAirdrop(manager: Address): Promise<void> {
+  console.log('\n💰 Requesting SOL airdrop...');
   
   // Check current balance first
-  const currentBalance = await checkSolBalance(manager);
-  console.log(`💰 Current SOL balance: ${currentBalance.toFixed(4)} SOL`);
+  let currentBalance = await checkSolBalance(manager);
   
   if (currentBalance >= 0.01) {
-    console.log('✅ Sufficient SOL balance already available!');
+    console.log('✅ Sufficient SOL balance available!');
     return;
   }
   
-  console.log('\n💸 Please send SOL to the manager wallet:');
-  console.log(`📍 Address: ${manager}`);
-  console.log('💰 Required: At least 0.01 SOL (for transaction fees)');
-  console.log('🌐 Network: Devnet');
-  
-  const hasSent = await prompt('\nHave you sent SOL to the manager wallet? (y/n): ');
-  if (hasSent.toLowerCase() !== 'y') {
-    console.log('❌ Please send SOL to the manager wallet first and run the script again.');
-    process.exit(1);
+  try {
+    // Request airdrop from Solana faucet
+    const airdropAmount = 2; // 2 SOL from faucet
+    console.log(`📤 Requesting ${airdropAmount} SOL from faucet...`);
+    
+    // Use the RPC connection to request airdrop
+    // Convert SOL to lamports using the lamports function
+    const signature = await rpc.requestAirdrop(address(manager), lamports(BigInt(airdropAmount * 1000000000))).send();
+    
+    console.log(`✅ Airdrop requested! Tx: ${signature}`);
+    console.log('⏳ Waiting for confirmation...');
+    
+    // Wait a bit for the airdrop to be processed
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    
+    // Check balance again
+    currentBalance = await checkSolBalance(manager);
+    
+    if (currentBalance >= 0.01) {
+      console.log('✅ Airdrop successful!');
+    } else {
+      console.log('⚠️  Airdrop may still be processing. Please try again.');
+    }
+    
+  } catch (error) {
+    console.error('❌ Airdrop failed:', error);
+    console.log('💡 Manual airdrop: https://faucet.solana.com/');
   }
-  
-  console.log('✅ SOL funding confirmed!');
 }
 
 async function createMultisigProgrammatically(manager: CryptoKeyPair, voter1: Address, voter2: Address): Promise<string> {
-  console.log('\n🏛️  Creating Multisig Programmatically');
-  console.log('=====================================\n');
+  console.log('\n🏛️  Creating multisig...');
   
   try {
     // Load wallet from environment or use manager as creator
@@ -78,17 +92,6 @@ async function createMultisigProgrammatically(manager: CryptoKeyPair, voter1: Ad
     const [programConfigPda] = await getProgramConfigPda();
     const programConfig = await fetchProgramConfig(rpc, address(programConfigPda));
     const configTreasury = programConfig.data.treasury;
-    console.log('📋 Multisig Configuration:');
-    console.log(`   Manager: ${managerAddress} (can propose, vote, and execute)`);
-    console.log(`   Voter1: ${voter1} (can vote only)`);
-    console.log(`   Voter2: ${voter2} (can vote only)`);
-    console.log(`   Threshold: 2 out of 3 members`);
-    console.log(`   Treasury: ${configTreasury}`);
-    console.log(`   Multisig: ${multisigPda}`);
-    console.log(`   Program Config: ${programConfigPda}`);
-    console.log(`   Rent Collector: ${managerAddress}`);
-    console.log(`   Config Authority: ${managerAddress}`);
-    console.log(`   Create Key: ${ephemeralAddress}`);
 
     // Create multisig instruction using Squads utils
     const multisigCreateInstruction = getMultisigCreateV2Instruction({
@@ -125,17 +128,27 @@ async function createMultisigProgrammatically(manager: CryptoKeyPair, voter1: Ad
       memo: 'Multisig created via Solana Kit and Squads utils',
     });
 
-    // Send and confirm transaction
-    const signature = await signAndSendTransaction(
-      [multisigCreateInstruction],
-      [manager, ephemeralKeypair],
+    // Prepare transaction using @solana/kit
+    const transaction = await prepareTransaction(
+      [multisigCreateInstruction as Instruction<string>],
       managerAddress
     );
     
-    console.log('✅ Multisig created successfully!');
-    console.log(`🔗 Transaction: ${signature}`);
-    console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}`);
-    console.log(`🏛️  Multisig Address: ${multisigPda}`);
+    // Sign transaction
+    const signedTransaction = await signTransaction(
+      [manager, ephemeralKeypair],
+      transaction
+    );
+    
+    // Get wire transaction
+    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+    
+    // Send transaction
+    const signature = await sendTransaction(wireTransaction);
+    
+    console.log('✅ Multisig created!');
+    console.log(`🏛️  Address: ${multisigPda}`);
+    console.log(`🔗 Tx: ${signature}`);
     
     return multisigPda;
   } catch (error) {
@@ -144,23 +157,44 @@ async function createMultisigProgrammatically(manager: CryptoKeyPair, voter1: Ad
   }
 }
 
-async function requestUserToSendUSDC(managerAddress: string): Promise<void> {
+async function requestUSDCAirdrop(managerAddress: string): Promise<void> {
   console.log('\n💰 USDC Funding Required');
   console.log('========================\n');
   
   console.log('📍 Manager Wallet Address:', managerAddress);
   console.log('🌐 Network: Devnet');
   console.log('💰 Required: At least 0.1 USDC');
-  console.log('\n💸 Please send USDC to the manager wallet:');
-  console.log(`🔗 USDC Mint Address: ${USDC_MINT}`);
   
-  const hasSent = await prompt('\nHave you sent USDC to the manager wallet? (y/n): ');
-  if (hasSent.toLowerCase() !== 'y') {
-    console.log('❌ Please send USDC to the manager wallet first and run the script again.');
-    process.exit(1);
+  console.log('\n🚀 Requesting USDC airdrop from Circle Faucet...');
+  console.log('🔗 Faucet: https://faucet.circle.com/');
+  console.log(`🪙 USDC Mint: ${USDC_MINT}`);
+  
+  try {
+    // Note: Circle faucet requires manual interaction via web interface
+    // We'll provide instructions and wait for user confirmation
+    console.log('\n📋 Manual USDC Airdrop Required:');
+    console.log('1. Visit: https://faucet.circle.com/');
+    console.log('2. Select "Solana Devnet" from the network dropdown');
+    console.log('3. Enter your wallet address:', managerAddress);
+    console.log('4. Request 10 USDC (free per hour)');
+    console.log('5. Wait for transaction confirmation');
+    
+    console.log('\n⏳ Waiting for USDC airdrop...');
+    console.log('Press Enter when you have received the USDC airdrop...');
+    
+    // Wait for user confirmation
+    await prompt('Press Enter to continue after receiving USDC...');
+    
+    console.log('✅ USDC airdrop received!');
+    
+  } catch (error) {
+    console.error('❌ USDC airdrop setup failed:', error);
+    console.log('\n💸 Please manually request USDC from the faucet:');
+    console.log('🔗 Faucet: https://faucet.circle.com/');
+    console.log(`📍 Address: ${managerAddress}`);
+    console.log(`🪙 USDC Mint: ${USDC_MINT}`);
+    console.log('🌐 Network: Devnet');
   }
-  
-  console.log('✅ USDC funding confirmed!');
 }
 
 async function sendSOLToVoters(
@@ -220,14 +254,26 @@ async function sendSOLToVoters(
     }
     
     console.log('📤 Sending SOL transfers...');
-    const signature = await signAndSendTransaction(
-      instructions,
-      [sender],
+    
+    // Prepare transaction using @solana/kit
+    const transaction = await prepareTransaction(
+      instructions as Instruction<string>[],
       senderAddress
     );
     
+    // Sign transaction
+    const signedTransaction = await signTransaction(
+      [sender],
+      transaction
+    );
+    
+    // Get wire transaction
+    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+    
+    // Send transaction
+    const signature = await sendTransaction(wireTransaction);
+    
     console.log(`✅ SOL transfers successful!`);
-    console.log(`🔗 Transaction: ${signature}`);
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}`);
     console.log(`💰 Sent ${amountPerVoter} SOL to ${votersNeedingSOL.length} voters for transaction fees`);
     
@@ -261,14 +307,26 @@ async function depositSOLToVault(
     
     console.log('📤 Sending SOL deposit to vault...');
     const senderAddress = await getAddressFromPublicKey(sender.publicKey);
-    const signature = await signAndSendTransaction(
-      transferIxns,
-      [sender],
+    
+    // Prepare transaction using @solana/kit
+    const transaction = await prepareTransaction(
+      transferIxns as Instruction<string>[],
       senderAddress
     );
     
+    // Sign transaction
+    const signedTransaction = await signTransaction(
+      [sender],
+      transaction
+    );
+    
+    // Get wire transaction
+    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+    
+    // Send transaction
+    const signature = await sendTransaction(wireTransaction);
+    
     console.log(`✅ SOL deposit to vault successful!`);
-    console.log(`🔗 Transaction: ${signature}`);
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}`);
     console.log(`💰 Deposited 0.01 SOL to vault for initialization`);
     
@@ -301,14 +359,26 @@ async function createUSDCTransferToMultisig(
     
     console.log('📤 Sending USDC transfer transaction...');
     const senderAddress = await getAddressFromPublicKey(sender.publicKey);
-    const signature = await signAndSendTransaction(
-      transferIxns,
-      [sender],
+    
+    // Prepare transaction using @solana/kit
+    const transaction = await prepareTransaction(
+      transferIxns as Instruction<string>[],
       senderAddress
     );
     
+    // Sign transaction
+    const signedTransaction = await signTransaction(
+      [sender],
+      transaction
+    );
+    
+    // Get wire transaction
+    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+    
+    // Send transaction
+    const signature = await sendTransaction(wireTransaction);
+    
     console.log(`✅ USDC transfer successful!`);
-    console.log(`🔗 Transaction: ${signature}`);
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}`);
     console.log(`💰 Transferred 0.1 USDC to multisig vault`);
     
@@ -327,11 +397,12 @@ async function main() {
     
     console.log('📋 This tool will help you:');
     console.log('   1. Create or load Manager and Voter wallets');
-    console.log('   2. Request SOL funding for manager wallet');
+    console.log('   2. Automatically request SOL airdrop from Solana faucet');
     console.log('   3. Fund voters with SOL for transaction fees');
     console.log('   4. Create multisig programmatically with proper permissions');
     console.log('   5. Deposit SOL to vault for initialization');
-    console.log('   6. Transfer USDC to the multisig vault');
+    console.log('   6. Request USDC airdrop from Circle faucet');
+    console.log('   7. Transfer USDC to the multisig vault');
     console.log('\n⚠️  IMPORTANT: This is for Devnet usage!\n');
     
     // Step 1: Create or load Manager and Voter wallets
@@ -368,8 +439,8 @@ async function main() {
     console.log(`👤 Voter1: ${voter1Address} (can vote only)`);
     console.log(`👤 Voter2: ${voter2Address} (can vote only)`);
 
-    // Step 2: Request SOL funding for manager wallet
-    await requestUserToSendSOL(managerAddress);
+    // Step 2: Request SOL airdrop for manager wallet
+    await requestSOLAirdrop(managerAddress);
     
     // Check SOL balance
     const managerBalance = await checkSolBalance(managerAddress);
@@ -378,7 +449,8 @@ async function main() {
     console.log(`   Manager: ${managerBalance.toFixed(4)} SOL`);
     
     if (managerBalance < 0.01) {
-      console.log('❌ Insufficient SOL balance. Please send more SOL to the manager wallet.');
+      console.log('❌ Insufficient SOL balance. Please try requesting another airdrop.');
+      console.log('🔗 Manual airdrop: https://faucet.solana.com/');
       process.exit(1);
     }
     
@@ -396,8 +468,8 @@ async function main() {
     // Step 5: Deposit SOL to vault for initialization
     await depositSOLToVault(manager, multisigAddress);
     
-    // Step 6: Request USDC funding
-    await requestUserToSendUSDC(managerAddress);
+    // Step 6: Request USDC airdrop
+    await requestUSDCAirdrop(managerAddress);
     
     // Step 7: Transfer 0.1 USDC to the multisig vault
     await createUSDCTransferToMultisig(manager, multisigAddress);

@@ -6,6 +6,7 @@ import {
   fetchMaybeProposal,
   getVaultTransactionPda,
   getProposalPda,
+  getVaultPda,
 } from './utils/squads/index';
 import { 
   address, 
@@ -13,6 +14,7 @@ import {
 } from '@solana/kit';
 import { loadMultisigAddressFromConfig } from './utils/config';
 import { rpc } from './utils/rpc';
+import { checkSolBalance, checkUSDCBalance, formatSolBalance, formatUSDCBalance } from './utils/balance';
 
 interface TransactionInfo {
   index: number;
@@ -103,6 +105,31 @@ function getMemberRole(permissions: { mask: number }): MemberInfo {
   };
 }
 
+async function getVaultHoldings(multisigAddress: string): Promise<{ solBalance: number; usdcBalance: number; vaultAddress: string }> {
+  try {
+    // Get the vault PDA (index 0)
+    const [vaultPda] = await getVaultPda(multisigAddress, 0);
+    
+    // Check SOL and USDC balances
+    const solBalance = await checkSolBalance(address(vaultPda));
+    const usdcBalance = await checkUSDCBalance(address(vaultPda));
+    
+    return {
+      solBalance,
+      usdcBalance,
+      vaultAddress: vaultPda
+    };
+  } catch (error) {
+    console.error('Error fetching vault holdings:', error);
+    return {
+      solBalance: 0,
+      usdcBalance: 0,
+      vaultAddress: 'Unknown'
+    };
+  }
+}
+
+
 async function fetchTransactionInfo(
   multisigAddress: string, 
   transactionIndex: number
@@ -176,7 +203,15 @@ async function main() {
     // Load multisig address from config
     console.log('✅ Loading multisig address...');
     const multisigAddress = await loadMultisigAddressFromConfig();
-    console.log(`🏛️  Multisig Address: ${multisigAddress}\n`);
+    console.log(`🏛️  Multisig Address: ${multisigAddress}`);
+    
+    // Show vault holdings prominently
+    console.log('\n💰 VAULT HOLDINGS (Quick View)');
+    console.log('===============================');
+    const vaultHoldings = await getVaultHoldings(multisigAddress);
+    console.log(`🏦 Vault: ${vaultHoldings.vaultAddress}`);
+    console.log(`💎 SOL: ${formatSolBalance(vaultHoldings.solBalance)} | 💵 USDC: ${formatUSDCBalance(vaultHoldings.usdcBalance)}`);
+    console.log('');
     
     // Fetch multisig account data
     console.log('📊 Fetching multisig account data...');
@@ -184,19 +219,46 @@ async function main() {
     const lastTransactionIndex = Number(multisigAccount.data.transactionIndex);
     const staleTransactionIndex = Number(multisigAccount.data.staleTransactionIndex || 0);
     
+    // Vault holdings already fetched above
+    
     // Display basic multisig information
     console.log('🏛️  MULTISIG INFORMATION');
     console.log('========================');
     console.log(`📍 Address: ${multisigAddress}`);
-    console.log(`🔑 Create Key: ${multisigAccount.data.createKey}`);
-    console.log(`⚙️  Config Authority: ${multisigAccount.data.configAuthority}`);
+    console.log(`🔑 Create Key: ${multisigAccount.data.createKey.toString()}`);
+    console.log(`⚙️  Config Authority: ${multisigAccount.data.configAuthority.toString()}`);
     console.log(`🎯 Threshold: ${multisigAccount.data.threshold}`);
     console.log(`⏰ Time Lock: ${multisigAccount.data.timeLock} seconds`);
     console.log(`📈 Total Transactions: ${lastTransactionIndex}`);
     console.log(`🔄 Stale Transaction Index: ${staleTransactionIndex}`);
     console.log(`👥 Total Members: ${multisigAccount.data.members.length}`);
-    console.log(`💰 Rent Collector: ${multisigAccount.data.rentCollector || 'None'}`);
+    console.log(`💰 Rent Collector: ${multisigAccount.data.rentCollector ? multisigAccount.data.rentCollector.toString() : 'None'}`);
     console.log(`🔧 Bump: ${multisigAccount.data.bump}`);
+    
+    // Display vault holdings
+    console.log('\n💰 VAULT HOLDINGS');
+    console.log('=================');
+    console.log(`🏦 Vault Address: ${vaultHoldings.vaultAddress}`);
+    console.log(`💎 SOL Balance: ${formatSolBalance(vaultHoldings.solBalance)}`);
+    console.log(`💵 USDC Balance: ${formatUSDCBalance(vaultHoldings.usdcBalance)}`);
+    
+    if (vaultHoldings.solBalance === 0 && vaultHoldings.usdcBalance === 0) {
+      console.log('⚠️  Vault is empty - no funds available for transactions');
+    } else {
+      console.log('✅ Vault has funds available for transactions');
+      
+      // Show what types of transactions are possible
+      if (vaultHoldings.solBalance >= 0.001) {
+        console.log(`   💎 SOL transfers possible (${formatSolBalance(vaultHoldings.solBalance)} available)`);
+      }
+      if (vaultHoldings.usdcBalance >= 0.01) {
+        console.log(`   💵 USDC transfers possible (${formatUSDCBalance(vaultHoldings.usdcBalance)} available)`);
+      }
+      if (vaultHoldings.solBalance < 0.001 && vaultHoldings.usdcBalance < 0.01) {
+        console.log('   ⚠️  Low balance - may not be sufficient for meaningful transfers');
+      }
+    }
+    
     
     // Determine if multisig is autonomous or controlled
     const isAutonomous = multisigAccount.data.configAuthority === '11111111111111111111111111111111';
@@ -210,7 +272,7 @@ async function main() {
       const memberInfo = getMemberRole(member.permissions);
       memberInfo.address = member.key;
       
-      console.log(`\n${index + 1}. ${member.key}`);
+      console.log(`\n${index + 1}. ${member.key.toString()}`);
       console.log(`   🎭 Role: ${memberInfo.role}`);
       console.log(`   📝 Can Propose: ${memberInfo.canPropose ? '✅' : '❌'}`);
       console.log(`   🗳️  Can Vote: ${memberInfo.canVote ? '✅' : '❌'}`);
@@ -262,7 +324,7 @@ async function main() {
       console.log(`   📍 Proposal: ${tx.proposalPda}`);
       
       if (tx.creator) {
-        console.log(`   👤 Creator: ${tx.creator}`);
+        console.log(`   👤 Creator: ${tx.creator.toString()}`);
       }
       
       if (tx.vaultIndex !== undefined) {
@@ -338,6 +400,25 @@ async function main() {
     
     if (voters < multisigAccount.data.threshold) {
       console.log(`⚠️  WARNING: Threshold (${multisigAccount.data.threshold}) is higher than number of voters (${voters})!`);
+    }
+    
+    // Vault summary
+    console.log('\n💰 VAULT SUMMARY');
+    console.log('================');
+    console.log(`🏦 Vault Address: ${vaultHoldings.vaultAddress}`);
+    console.log(`💎 SOL: ${formatSolBalance(vaultHoldings.solBalance)} | 💵 USDC: ${formatUSDCBalance(vaultHoldings.usdcBalance)}`);
+    
+    const totalValue = vaultHoldings.solBalance + (vaultHoldings.usdcBalance * 0.0001); // Rough estimate
+    console.log(`💎 Estimated Total Value: ~${totalValue.toFixed(4)} SOL equivalent`);
+    
+    if (vaultHoldings.solBalance > 0) {
+      console.log(`✅ SOL available for transfers and transaction fees`);
+    }
+    if (vaultHoldings.usdcBalance > 0) {
+      console.log(`✅ USDC available for transfers`);
+    }
+    if (vaultHoldings.solBalance === 0 && vaultHoldings.usdcBalance === 0) {
+      console.log(`⚠️  No funds in vault - consider funding before creating transactions`);
     }
     
   } catch (error) {

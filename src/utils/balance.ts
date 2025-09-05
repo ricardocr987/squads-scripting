@@ -8,7 +8,7 @@ import type { EncodedAccount } from '@solana/accounts';
 import { address } from '@solana/kit';
 import type { Address, ReadonlyUint8Array } from '@solana/kit';
 import { getMintInfo } from './getMint';
-import { SOL_MINT, USDC_MINT } from './constants';
+import { SOL_MINT, USDC_MINT_DEVNET } from './constants';
 import type { BalanceResult } from './types';
 
 export async function getTokenBalance(
@@ -90,7 +90,7 @@ export async function checkSolBalance(address: Address): Promise<number> {
 
 export async function checkUSDCBalance(address: Address): Promise<number> {
   try {
-    const balance = await getTokenBalance(address, USDC_MINT);
+    const balance = await getTokenBalance(address, USDC_MINT_DEVNET);
     return balance ? parseFloat(balance) : 0;
   } catch (error) {
     console.error('Error checking USDC balance:', error);

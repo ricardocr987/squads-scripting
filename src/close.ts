@@ -1,20 +1,131 @@
 import { 
-  getProposalCancelInstruction,
   getVaultTransactionAccountsCloseInstruction,
-  fetchMultisig,
-  getProposalPda,
   getVaultTransactionPda,
+  getProposalPda,
+  fetchMultisig,
+  fetchMaybeProposal,
+  fetchMaybeVaultTransaction,
 } from './utils/squads/index';
-import { 
-  address, 
-  createSignerFromKeyPair,
-  getAddressFromPublicKey
-} from '@solana/kit';
+import { address, getAddressFromPublicKey } from '@solana/kit';
 import { loadWalletFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
-import { signAndSendTransaction } from './utils/sign';
 import { sleep } from 'bun';
 import { rpc } from './utils/rpc';
+import { prompt } from './utils/prompt';
+import { signAndSendTransaction } from './utils/sign';
+
+async function getClosableTransactions(multisigAddress: string) {
+  const multisigAccount = await fetchMultisig(rpc, address(multisigAddress));
+  const closableTransactions = [];
+
+  for (let i = 1; i <= Number(multisigAccount.data.transactionIndex); i++) {
+    try {
+      const [transactionPda] = await getVaultTransactionPda(multisigAddress, BigInt(i));
+      const [proposalPda] = await getProposalPda(multisigAddress, BigInt(i));
+
+      // Fetch both vault transaction and proposal data
+      const [vaultTransactionResult, proposalResult] = await Promise.allSettled([
+        fetchMaybeVaultTransaction(rpc, address(transactionPda)),
+        fetchMaybeProposal(rpc, address(proposalPda))
+      ]);
+
+      const vaultTransaction = vaultTransactionResult.status === 'fulfilled' ? vaultTransactionResult.value : null;
+      const proposal = proposalResult.status === 'fulfilled' ? proposalResult.value : null;
+
+      if (!vaultTransaction || !vaultTransaction.exists) {
+        continue; // Skip if vault transaction doesn't exist
+      }
+
+      const isStale = i <= Number(multisigAccount.data.staleTransactionIndex || 0);
+      let status = 'Unknown';
+      let canClose = false;
+
+      if (proposal && proposal.exists) {
+        status = proposal.data.status.__kind;
+        
+        // Can close if: stale, cancelled, executed, or rejected
+        canClose = isStale || 
+                   status === 'Cancelled' || 
+                   status === 'Executed' || 
+                   status === 'Rejected';
+      } else {
+        // If no proposal exists but transaction is stale, we can close it
+        canClose = isStale;
+        status = 'Stale (No Proposal)';
+      }
+
+      if (canClose) {
+        closableTransactions.push({
+          index: i,
+          pda: transactionPda,
+          proposalPda: proposalPda,
+          status: status,
+          isStale: isStale,
+          isCancelled: status === 'Cancelled',
+          isExecuted: status === 'Executed',
+          isRejected: status === 'Rejected',
+        });
+      }
+    } catch (error) {
+      continue;
+    }
+  }
+
+  return closableTransactions;
+}
+
+async function selectMember(): Promise<'voter1' | 'voter2' | 'manager'> {
+  const members = ['voter1', 'voter2', 'manager'];
+  
+  console.log('\n👥 Available Members:');
+  members.forEach((member, index) => {
+    console.log(`   ${index + 1}. ${member}`);
+  });
+  
+  const choice = await prompt('\nSelect member to sign the close transaction (1-3): ');
+  const memberIndex = parseInt(choice || '0') - 1;
+  
+  if (memberIndex < 0 || memberIndex >= members.length) {
+    throw new Error('Invalid member selection');
+  }
+  
+  return members[memberIndex] as 'voter1' | 'voter2' | 'manager';
+}
+
+async function selectTransactions(transactions: any[]): Promise<any[]> {
+  if (transactions.length === 0) {
+    return [];
+  }
+  
+  console.log('\n📋 Closable Transactions:');
+  transactions.forEach((tx, index) => {
+    const statusDetails = [];
+    if (tx.isStale) statusDetails.push('Stale');
+    if (tx.isCancelled) statusDetails.push('Cancelled');
+    if (tx.isExecuted) statusDetails.push('Executed');
+    if (tx.isRejected) statusDetails.push('Rejected');
+    
+    console.log(`   ${index + 1}. Transaction #${tx.index} - ${tx.status}`);
+    console.log(`      Details: ${statusDetails.join(', ')}`);
+  });
+  
+  const choice = await prompt(`\nSelect transactions to close (1-${transactions.length}, or 'all' for all): `);
+  
+  if (choice.toLowerCase() === 'all') {
+    return transactions;
+  }
+  
+  const indices = choice.split(',').map(s => parseInt(s.trim()) - 1);
+  const selectedTransactions = indices
+    .filter(i => i >= 0 && i < transactions.length)
+    .map(i => transactions[i]);
+  
+  if (selectedTransactions.length === 0) {
+    throw new Error('No valid transactions selected');
+  }
+  
+  return selectedTransactions;
+}
 
 async function main() {
   try {
@@ -26,141 +137,75 @@ async function main() {
     const multisigAddress = await loadMultisigAddressFromConfig();
     console.log(`🏛️  Multisig Address: ${multisigAddress}`);
     
-    // Load a wallet for signing (using manager as default)
+    // Get closable transactions
+    console.log('🔍 Fetching closable transactions...');
+    const closableTransactions = await getClosableTransactions(multisigAddress);
+    
+    if (closableTransactions.length === 0) {
+      console.log('💡 No transactions found that can be closed.');
+      console.log('   All transactions are current or already processed.');
+      return;
+    }
+    
+    console.log(`\nFound ${closableTransactions.length} closable transactions`);
+    
+    // Select transactions to close
+    const selectedTransactions = await selectTransactions(closableTransactions);
+    if (selectedTransactions.length === 0) {
+      console.log('❌ No transactions selected');
+      return;
+    }
+    
+    // Select member to sign
+    const selectedMember = await selectMember();
+    console.log(`\n✅ Selected member: ${selectedMember}`);
+    
+    // Load the selected member's wallet
     console.log('✅ Loading wallet for signing...');
-    console.log('Note: Only Manager can close transactions');
-    const executor = await loadWalletFromConfig('manager');
-    const signer = await createSignerFromKeyPair(executor);
+    const executor = await loadWalletFromConfig(selectedMember);
     const signerAddress = await getAddressFromPublicKey(executor.publicKey);
     console.log(`👤 Signer: ${signerAddress}`);
+    
+    // Confirm closing
+    const confirm = await prompt(`\n🧹 Are you sure you want to close ${selectedTransactions.length} transaction(s)? (y/N): `);
+    if (confirm.toLowerCase() !== 'y' && confirm.toLowerCase() !== 'yes') {
+      console.log('❌ Transaction closing cancelled');
+      return;
+    }
+    
+    console.log(`\n🧹 Closing ${selectedTransactions.length} transaction(s)...`);
+    console.log('==========================================\n');
 
-    // Get multisig account info
-    const multisigAccount = await fetchMultisig(rpc, address(multisigAddress));
-
-    console.log('Current transaction index:', multisigAccount.data.transactionIndex);
-    console.log('Stale transaction index:', multisigAccount.data.staleTransactionIndex || 0);
-
-    // Get all transactions up to current index
-    const transactions = [];
-    const proposalsToCancel = [];
-    const staleIndex = multisigAccount.data.staleTransactionIndex || 0;
-
-    for (let i = 1; i <= Number(multisigAccount.data.transactionIndex); i++) {
-      const [transactionPda] = await getVaultTransactionPda(multisigAddress, BigInt(i));
+    // Close each selected transaction
+    for (const tx of selectedTransactions) {
+      const statusDetails = [];
+      if (tx.isStale) statusDetails.push('Stale');
+      if (tx.isCancelled) statusDetails.push('Cancelled');
+      if (tx.isExecuted) statusDetails.push('Executed');
+      if (tx.isRejected) statusDetails.push('Rejected');
+      
+      console.log(`Closing Transaction #${tx.index} - ${tx.status} (${statusDetails.join(', ')})`);
 
       try {
-        // Get proposal status
-        const [proposalPda] = await getProposalPda(multisigAddress, BigInt(i));
-
-        // For now, we'll assume transactions are stale if they're below the stale index
-        // In a real implementation, you'd fetch the actual proposal and transaction accounts
-        const isStale = i < Number(staleIndex);
-        
-        // For simplicity, we'll mark all transactions as candidates for closing
-        // In practice, you'd check the actual status of each proposal/transaction
-        if (isStale) {
-          transactions.push({
-            index: i,
-            pda: transactionPda,
-            status: { isStale: true, isCancelled: false, isExecuted: false },
-          });
-        } else {
-          // For non-stale transactions, we might want to cancel them first
-          proposalsToCancel.push({
-            index: i,
-            status: 'Active', // Assume active for now
-          });
-        }
-      } catch (error) {
-        // Transaction account might not exist, skip it
-        console.log(`Skipping transaction ${i} (account not found)`);
-        continue;
-      }
-    }
-
-    // First cancel any active proposals
-    if (proposalsToCancel.length > 0) {
-      console.log(
-        `Found ${proposalsToCancel.length} active/approved proposals to cancel`
-      );
-
-      for (const proposal of proposalsToCancel) {
-        console.log(
-          `Attempting to cancel proposal ${proposal.index} (current status: ${proposal.status})`
-        );
-
-        try {
-          const [proposalPda] = await getProposalPda(multisigAddress, BigInt(proposal.index));
-          
-          const cancelInstruction = getProposalCancelInstruction({
-            multisig: address(multisigAddress),
-            proposal: address(proposalPda),
-            member: signer,
-            args: {
-              memo: `Cancelled by ${signerAddress}`,
-            },
-          });
-
-          console.log('📤 Sending cancellation transaction...');
-          const signature = await signAndSendTransaction(
-            [cancelInstruction],
-            [executor],
-            signerAddress
-          );
-          
-          console.log(`✅ Proposal ${proposal.index} cancelled: ${signature}`);
-
-          // Add to transactions to close after successful cancellation
-          const [transactionPda] = await getVaultTransactionPda(multisigAddress, BigInt(proposal.index));
-
-          transactions.push({
-            index: proposal.index,
-            pda: transactionPda,
-            status: { isCancelled: true },
-          });
-        } catch (error) {
-          console.error(
-            `Error cancelling proposal ${proposal.index}:`,
-            error
-          );
-          continue;
-        }
-
-        await sleep(1000);
-      }
-    }
-
-    console.log(`Found ${transactions.length} transactions to close`);
-
-    // Close each transaction
-    for (const tx of transactions) {
-      console.log(
-        `Closing transaction ${tx.index} (${Object.entries(tx.status)
-          .filter(([, v]) => v)
-          .map(([k]) => k)
-          .join(', ')})`
-      );
-
-      try {
-        const [proposalPda] = await getProposalPda(multisigAddress, BigInt(tx.index));
-        
         const closeInstruction = getVaultTransactionAccountsCloseInstruction({
           multisig: address(multisigAddress),
-          proposal: address(proposalPda),
+          proposal: address(tx.proposalPda),
           transaction: address(tx.pda),
           rentCollector: address(signerAddress),
         });
 
         console.log('📤 Sending close transaction...');
+        
+        // Prepare transaction using @solana/kit
         const signature = await signAndSendTransaction(
           [closeInstruction],
           [executor],
           signerAddress
         );
         
-        console.log(`✅ Transaction ${tx.index} closed: ${signature}`);
+        console.log(`✅ Transaction #${tx.index} closed successfully by ${selectedMember} with signature ${signature}!`);
       } catch (error) {
-        console.error(`Error closing transaction ${tx.index}:`, error);
+        console.error(`❌ Error closing transaction #${tx.index}:`, error);
         continue;
       }
 
@@ -168,8 +213,8 @@ async function main() {
       await sleep(1000);
     }
 
-    console.log('\n🎉 Finished closing transactions');
-    console.log('💡 All stale and cancelled transactions have been cleaned up.');
+    console.log('\n🎉 Transaction cleanup completed!');
+    console.log('💡 All selected transactions have been closed and cleaned up.');
   } catch (error) {
     console.error('❌ Error closing transactions:', error);
     process.exit(1);

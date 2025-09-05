@@ -14,6 +14,8 @@ import { main as approveMain } from './approve';
 import { main as executeMain } from './execute';
 import { main as transferMain } from './transfer';
 import { main as closeMain } from './close';
+import { main as rejectMain } from './reject';
+import { main as cancelMain } from './cancel';
 import { main as infoMain } from './info';
 import { main as configMain } from './config';
 
@@ -27,11 +29,11 @@ interface ScriptOption {
 
 const scripts: ScriptOption[] = [
   {
-    id: 'start',
-    name: '🚀 Setup & Initialize',
-    description: 'Create multisig, generate wallets, and set up the system',
-    requiresConfig: false,
-    function: startMain
+    id: 'config',
+    name: '⚙️  Manage Multisig Config',
+    description: 'Create and execute multisig configuration changes',
+    requiresConfig: true,
+    function: configMain
   },
   {
     id: 'info',
@@ -62,11 +64,18 @@ const scripts: ScriptOption[] = [
     function: executeMain
   },
   {
-    id: 'transfer',
-    name: '💰 Transfer to Treasury',
-    description: 'Transfer SOL or USDC to the config treasury',
+    id: 'reject',
+    name: '🚫 Reject Proposals',
+    description: 'Reject active proposals',
     requiresConfig: true,
-    function: transferMain
+    function: rejectMain
+  },
+  {
+    id: 'cancel',
+    name: '❌ Cancel Proposals',
+    description: 'Cancel stale proposals',
+    requiresConfig: true,
+    function: cancelMain
   },
   {
     id: 'close',
@@ -76,11 +85,11 @@ const scripts: ScriptOption[] = [
     function: closeMain
   },
   {
-    id: 'config',
-    name: '⚙️  Manage Multisig Config',
-    description: 'Create and execute multisig configuration changes',
+    id: 'transfer',
+    name: '💰 Transfer to Treasury',
+    description: 'Transfer SOL or USDC to the multisig vault',
     requiresConfig: true,
-    function: configMain
+    function: transferMain
   }
 ];
 
@@ -130,12 +139,13 @@ async function runScript(script: ScriptOption) {
     
     await script.function();
     
-    console.log('\n✅ Script completed successfully!');
   } catch (error) {
     console.error('\n❌ Script failed:', error);
     if (error && typeof error === 'object' && 'logs' in error) {
       console.error('Transaction logs:', (error as any).logs);
     }
+    // Don't throw - let the CLI continue running
+    console.log('⚠️  Continuing with CLI...');
   }
 }
 
@@ -151,11 +161,7 @@ async function ensureSetupComplete(): Promise<boolean> {
     console.log('• Create a multisig with proper permissions');
     console.log('• Set up the configuration file\n');
     
-    const proceed = await prompt('Proceed with initial setup? (y/n): ');
-    if (proceed.toLowerCase() !== 'y') {
-      console.log('❌ Setup cancelled. Cannot proceed without configuration.');
-      return false;
-    }
+    console.log('🚀 Proceeding with initial setup...');
     
     console.log('\n🚀 Running initial setup...');
     console.log('='.repeat(50));
@@ -200,7 +206,7 @@ async function main() {
       }
       
       if (choiceNum < 1 || choiceNum > scripts.length) {
-        console.log('❌ Invalid choice. Please select a number between 0 and 8.\n');
+        console.log(`❌ Invalid choice. Please select a number between 0 and ${scripts.length}.\n`);
         continue;
       }
       
@@ -216,23 +222,10 @@ async function main() {
         continue;
       }
       
-      // Confirm execution
-      const confirm = await prompt(`\nRun "${selectedScript.name}"? (y/n): `);
-      if (confirm.toLowerCase() !== 'y') {
-        console.log('❌ Command cancelled.\n');
-        continue;
-      }
-      
-      // Run the script
+      // Run the script immediately without confirmation
       await runScript(selectedScript);
       
-      // Ask if user wants to continue
-      const continueChoice = await prompt('\nReturn to main menu? (y/n): ');
-      if (continueChoice.toLowerCase() !== 'y') {
-        console.log('\n👋 Goodbye!');
-        process.exit(0);
-      }
-      
+      // Auto-print menu after script execution
       console.log('\n' + '='.repeat(60) + '\n');
     }
     

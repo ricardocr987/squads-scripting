@@ -4,15 +4,11 @@ import {
   createRpc, 
   createSolanaRpcApi,
 } from "@solana/rpc";
-import { config } from "process";
-
-if (!process.env.RPC_URL) {
-  throw new Error('RPC_URL is not set');
-}
+import { RPC_URL } from './env';
 
 // RPC HTTP Transport
 const quicknodeRpcTransport = createDefaultRpcTransport({ 
-  url: process.env.RPC_URL 
+  url: RPC_URL 
 });
 
 // Create API
@@ -25,6 +21,6 @@ export const rpc = createRpc({
 });
 
 export const solanaConnection = new web3.Connection(
-  process.env.RPC_URL,
+  RPC_URL,
   'confirmed'
 );

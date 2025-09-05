@@ -6,12 +6,16 @@ import {
 import { 
   address, 
   createSignerFromKeyPair,
-  getAddressFromPublicKey
+  getAddressFromPublicKey,
+  signTransaction,
+  getBase64EncodedWireTransaction,
+  type Instruction
 } from '@solana/kit';
 import { loadWalletFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
 import { prompt, promptWalletChoice } from './utils/prompt';
-import { signAndSendTransaction } from './utils/sign';
+import { prepareTransaction } from './utils/prepare';
+import { sendTransaction } from './utils/send';
 import { rpc } from './utils/rpc';
 
 async function approvePaymentTransaction(
@@ -40,15 +44,27 @@ async function approvePaymentTransaction(
       },
     });
     
-    console.log('📤 Sending approval transaction...');
-    const signature = await signAndSendTransaction(
-      [approveInstruction],
-      [voter],
+    console.log('📤 Preparing approval transaction...');
+    
+    // Prepare transaction using @solana/kit
+    const transaction = await prepareTransaction(
+      [approveInstruction as Instruction<string>],
       voterAddress
     );
     
+    // Sign transaction
+    const signedTransaction = await signTransaction(
+      [voter],
+      transaction
+    );
+
+    // Get wire transaction
+    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+    
+    console.log('📤 Sending approval transaction...');
+    const signature = await sendTransaction(wireTransaction);
+    
     console.log(`✅ Approval successful!`);
-    console.log(`🔗 Transaction: ${signature}`);
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}`);
     
   } catch (error) {
@@ -104,3 +120,4 @@ if (import.meta.main) {
 }
 
 export { main };
+

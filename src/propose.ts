@@ -1,19 +1,23 @@
 import { sleep } from 'bun';
 import * as multisig from '@sqds/multisig';
 import {
-    createKeyPairSignerFromBytes,
     getAddressFromPublicKey,
     address,
-    AccountRole,
+    signTransaction,
+    getBase64EncodedWireTransaction,
+    type Instruction
 } from '@solana/kit';
+import { fromLegacyTransactionInstruction } from '@solana/compat';
 import { 
-    Transaction, 
-    TransactionMessage, 
-    Keypair, 
-    sendAndConfirmTransaction, 
+    getVaultPda,
+    getProposalPda,
+    fetchMultisig,
+} from './utils/squads/index';
+import { 
     PublicKey,
     SystemProgram,
-    LAMPORTS_PER_SOL
+    LAMPORTS_PER_SOL,
+    TransactionMessage
 } from '@solana/web3.js';
 import { 
     createAssociatedTokenAccountInstruction,
@@ -22,16 +26,16 @@ import {
     TOKEN_PROGRAM_ID,
     ASSOCIATED_TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
-import { loadConfig, loadWalletFromConfig } from './utils/config';
+import { loadWalletFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
 import { prompt } from './utils/prompt';
-import { signAndSendTransaction } from './utils/sign';
+import { prepareTransaction } from './utils/prepare';
+import { sendTransaction } from './utils/send';
 import { USDC_MINT_DEVNET as USDC_MINT } from './utils/constants';
 import { solanaConnection, rpc } from './utils/rpc';
-import { fetchMultisig } from './utils/squads/index';
 
 async function proposePaymentTransaction(
-  proposer: Keypair,
+  proposer: CryptoKeyPair,
   multisigPda: string,
   recipientAddress: string,
   amount: number,
@@ -41,46 +45,43 @@ async function proposePaymentTransaction(
   
   try {
     // Get proposer address
-    const proposerAddress = proposer.publicKey.toString();
+    const proposerAddress = await getAddressFromPublicKey(proposer.publicKey);
     
     console.log(`📍 Proposer Address: ${proposerAddress}`);
     console.log(`💸 Payment amount: ${amount} ${paymentType}`);
     
     // Get multisig account info to get the next transaction index
-    const multisigInfo = await multisig.accounts.Multisig.fromAccountAddress(
-      solanaConnection,
-      new PublicKey(multisigPda)
-    );
+    const multisigAccount = await fetchMultisig(rpc, address(multisigPda));
     
-    const currentTransactionIndex = Number(multisigInfo.transactionIndex);
+    const currentTransactionIndex = Number(multisigAccount.data.transactionIndex);
     const newTransactionIndex = BigInt(currentTransactionIndex + 1);
     
     console.log(`📊 Current Transaction Index: ${currentTransactionIndex}`);
     console.log(`📊 New Transaction Index: ${newTransactionIndex}`);
     
     // Get the vault PDA for the multisig
-    const [vaultPda] = multisig.getVaultPda({
-      multisigPda: new PublicKey(multisigPda),
-      index: 0,
-    });
+    const [vaultPda] = await getVaultPda(multisigPda, 0);
     
-    console.log(`💰 Treasury PDA: ${vaultPda.toString()}`);
+    console.log(`💰 Treasury PDA: ${vaultPda}`);
     
     let transferInstruction: any;
     let transferAmount: bigint;
+    let instructions: any[] = [];
     
     if (paymentType === 'SOL') {
       // Create SOL transfer instruction
       transferAmount = BigInt(amount * LAMPORTS_PER_SOL); // Convert to lamports
       
       transferInstruction = SystemProgram.transfer({
-        fromPubkey: vaultPda,
+        fromPubkey: new PublicKey(vaultPda),
         toPubkey: new PublicKey(recipientAddress),
         lamports: transferAmount,
       });
       
+      instructions = [transferInstruction];
+      
       console.log('📋 SOL transfer instruction created');
-      console.log(`  From: ${vaultPda.toString()}`);
+      console.log(`  From: ${vaultPda}`);
       console.log(`  To: ${recipientAddress}`);
       console.log(`  Amount: ${transferAmount.toString()} lamports (${amount} SOL)`);
     } else {
@@ -90,7 +91,7 @@ async function proposePaymentTransaction(
       // Get associated token addresses
       const vaultTokenAccount = await getAssociatedTokenAddress(
         new PublicKey(USDC_MINT),
-        vaultPda,
+        new PublicKey(vaultPda),
         true // allowOwnerOffCurve for PDA
       );
       
@@ -99,30 +100,60 @@ async function proposePaymentTransaction(
         new PublicKey(recipientAddress)
       );
       
-      transferInstruction = createTransferInstruction(
+      // Check if recipient token account exists
+      try {
+        const accountInfo = await solanaConnection.getAccountInfo(recipientTokenAccount);
+        if (accountInfo) {
+          console.log('✅ Recipient token account already exists');
+        } else {
+          console.log('📋 Recipient token account does not exist, will create it');
+          // Create the associated token account instruction
+          const createTokenAccountInstruction = createAssociatedTokenAccountInstruction(
+            new PublicKey(vaultPda), // payer (the vault will pay for the account creation)
+            recipientTokenAccount, // associated token account address
+            new PublicKey(recipientAddress), // owner
+            new PublicKey(USDC_MINT), // mint
+            TOKEN_PROGRAM_ID,
+            ASSOCIATED_TOKEN_PROGRAM_ID
+          );
+          instructions.push(createTokenAccountInstruction);
+        }
+      } catch (error) {
+        console.log('📋 Recipient token account does not exist, will create it');
+        // Create the associated token account instruction
+        const createTokenAccountInstruction = createAssociatedTokenAccountInstruction(
+          new PublicKey(vaultPda), // payer (the vault will pay for the account creation)
+          recipientTokenAccount, // associated token account address
+          new PublicKey(recipientAddress), // owner
+          new PublicKey(USDC_MINT), // mint
+          TOKEN_PROGRAM_ID,
+          ASSOCIATED_TOKEN_PROGRAM_ID
+        );
+        instructions.push(createTokenAccountInstruction);
+      }
+      
+      // Create transfer instruction
+      const transferInstruction = createTransferInstruction(
         vaultTokenAccount,
         recipientTokenAccount,
-        vaultPda, // The vault PDA will be the authority
+        new PublicKey(vaultPda), // The vault PDA will be the authority
         transferAmount,
         [],
         TOKEN_PROGRAM_ID
       );
+      instructions.push(transferInstruction);
       
-      console.log('📋 USDC transfer instruction created');
+      console.log('📋 USDC transfer instructions created');
       console.log(`  From: ${vaultTokenAccount.toString()}`);
       console.log(`  To: ${recipientTokenAccount.toString()}`);
       console.log(`  Amount: ${transferAmount.toString()} raw USDC (${amount} USDC)`);
+      console.log(`  Instructions: ${instructions.length} (${instructions.length === 1 ? 'transfer only' : 'create account + transfer'})`);
+      if (instructions.length > 1) {
+        console.log(`  📝 Will create recipient token account before transfer`);
+      }
     }
     
-    // Use @sqds/multisig's built-in transaction creation
-    // This handles account management properly by using the SDK's methods
-    const multisigAccount = await multisig.accounts.Multisig.fromAccountAddress(
-      solanaConnection,
-      new PublicKey(multisigPda)
-    );
-    
-    // Create the transaction using the multisig's built-in method
-    // This should handle the account extraction properly
+    // Create the vault transaction using Squads SDK
     const vaultTransaction = multisig.instructions.vaultTransactionCreate({
       multisigPda: new PublicKey(multisigPda),
       transactionIndex: newTransactionIndex,
@@ -132,32 +163,37 @@ async function proposePaymentTransaction(
       transactionMessage: new TransactionMessage({
         payerKey: new PublicKey(proposerAddress),
         recentBlockhash: (await solanaConnection.getLatestBlockhash()).blockhash,
-        instructions: [transferInstruction],
+        instructions: instructions,
       }),
       memo: `Payment of ${amount} ${paymentType} to ${recipientAddress}`,
     });
     
     console.log('📤 Creating vault transaction...');
     
-    const createVaultTx = new Transaction().add(vaultTransaction);
-    createVaultTx.recentBlockhash = (
-        await solanaConnection.getLatestBlockhash()
-    ).blockhash;
-    createVaultTx.feePayer = new PublicKey(proposerAddress);
-
-    const vaultTxSignature = await sendAndConfirmTransaction(
-      solanaConnection,
-      createVaultTx,
-      [proposer],
-      {
-        commitment: 'confirmed',
-        skipPreflight: false,
-      }
+    // Convert the Squads SDK instruction to @solana/kit format
+    const vaultInstruction = fromLegacyTransactionInstruction(vaultTransaction);
+    
+    // Prepare transaction using @solana/kit
+    const vaultTransactionMessage = await prepareTransaction(
+      [vaultInstruction as Instruction<string>],
+      proposerAddress
     );
+    
+    // Sign transaction
+    const signedVaultTransaction = await signTransaction(
+      [proposer],
+      vaultTransactionMessage
+    );
+
+    // Get wire transaction
+    const vaultWireTransaction = getBase64EncodedWireTransaction(signedVaultTransaction);
+    
+    // Send and confirm transaction
+    const vaultTxSignature = await sendTransaction(vaultWireTransaction);
     
     console.log(`✅ Vault transaction created: ${vaultTxSignature}`);
     
-    // Create proposal instruction using @sqds/multisig
+    // Create proposal instruction using Squads SDK
     const createProposalIx = multisig.instructions.proposalCreate({
       multisigPda: new PublicKey(multisigPda),
       transactionIndex: newTransactionIndex,
@@ -167,29 +203,31 @@ async function proposePaymentTransaction(
     
     console.log('📤 Creating proposal...');
     
-    const createProposalTx = new Transaction().add(createProposalIx);
-    createProposalTx.recentBlockhash = (
-        await solanaConnection.getLatestBlockhash()
-    ).blockhash;
-    createProposalTx.feePayer = new PublicKey(proposerAddress);
-
-    const proposalTxSignature = await sendAndConfirmTransaction(
-      solanaConnection,
-      createProposalTx,
-      [proposer],
-      {
-        commitment: 'confirmed',
-        skipPreflight: false,
-      }
+    // Convert the Squads SDK instruction to @solana/kit format
+    const proposalInstruction = fromLegacyTransactionInstruction(createProposalIx);
+    
+    // Prepare transaction using @solana/kit
+    const proposalTransactionMessage = await prepareTransaction(
+      [proposalInstruction as Instruction<string>],
+      proposerAddress
     );
+    
+    // Sign transaction
+    const signedProposalTransaction = await signTransaction(
+      [proposer],
+      proposalTransactionMessage
+    );
+
+    // Get wire transaction
+    const proposalWireTransaction = getBase64EncodedWireTransaction(signedProposalTransaction);
+    
+    // Send and confirm transaction
+    const proposalTxSignature = await sendTransaction(proposalWireTransaction);
     
     console.log(`✅ Proposal created: ${proposalTxSignature}`);
     
     // Get the proposal PDA
-    const [proposalPda] = multisig.getProposalPda({
-      multisigPda: new PublicKey(multisigPda),
-      transactionIndex: newTransactionIndex,
-    });
+    const [proposalPda] = await getProposalPda(multisigPda, newTransactionIndex);
     
     await sleep(2000); // Wait a bit longer for account initialization
     
@@ -199,7 +237,7 @@ async function proposePaymentTransaction(
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${proposalTxSignature}?cluster=devnet`);
     console.log(`💸 Proposed payment: ${amount} ${paymentType} to ${recipientAddress}`);
     console.log(`📋 Transaction Index: ${newTransactionIndex}`);
-    console.log(`📋 Proposal PDA: ${proposalPda.toString()}`);
+    console.log(`📋 Proposal PDA: ${proposalPda}`);
     console.log(`\n📋 Next steps:`);
     console.log(`   1. Members need to vote on this proposal to execute the payment`);
     console.log(`   2. Once approved, the payment will be executed automatically`);
@@ -223,10 +261,6 @@ async function main() {
     console.log('✅ Loading wallet...');
     const proposer = await loadWalletFromConfig('manager');
     const proposerAddress = await getAddressFromPublicKey(proposer.publicKey);
-    const configData = await loadConfig();
-    const proposerKeypair = Keypair.fromSecretKey(
-      new Uint8Array(Buffer.from(configData.manager?.privateKey || '', 'base64'))
-    );
 
     console.log(`📍 Manager Public Key: ${proposerAddress}`);
     
@@ -271,22 +305,17 @@ async function main() {
       process.exit(1);
     }
     
-    // Confirm payment proposal
+    // Display payment proposal summary
     console.log('\n📋 Payment Proposal Summary:');
     console.log(`👤 Manager: ${proposerAddress}`);
     console.log(`🏛️  Multisig: ${multisigAddress}`);
     console.log(`👥 Recipient: ${recipientInput}`);
     console.log(`💵 Amount: ${amount} ${paymentType}`);
     console.log(`🗳️  Required Votes: ${multisigAccount.data.threshold}`);
-    
-    const confirm = await prompt('\nProceed with payment proposal? (y/n): ');
-    if (confirm.toLowerCase() !== 'y') {
-      console.log('❌ Payment proposal cancelled.');
-      process.exit(0);
-    }
+    console.log('🚀 Proceeding with payment proposal...');
     
     // Create the payment proposal
-    await proposePaymentTransaction(proposerKeypair, multisigAddress, recipientInput, amount, paymentType);
+    await proposePaymentTransaction(proposer, multisigAddress, recipientInput, amount, paymentType);
     
     console.log('\n🎉 Payment proposal completed successfully!');
     console.log('📋 The proposal is now pending approval from multisig members.');

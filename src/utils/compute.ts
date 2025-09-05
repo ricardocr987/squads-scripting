@@ -18,7 +18,7 @@ import {
   getSetComputeUnitPriceInstruction,
 } from '@solana-program/compute-budget';
 import { rpc } from './rpc';
-
+import { RPC_URL } from './env';
 export const PRIORITY_LEVELS = {
   MIN: 'Min',
   LOW: 'Low',
@@ -120,7 +120,7 @@ async function getPriorityFeeEstimate(
 ): Promise<number> {
   try {
     // Use QuickNode's getRecentPrioritizationFees RPC method
-    const response = await fetch(process.env.RPC_URL!, {
+    const response = await fetch(RPC_URL!, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -161,9 +161,7 @@ async function getPriorityFeeEstimate(
     }
 
     // Apply constraints and ensure we return a reasonable fee
-    const constrainedFee = Math.min(Math.max(medianFee, DEFAULT_PRIORITY_FEE), DEFAULT_PRIORITY_FEE * 10);
-    
-    console.log(`Priority fee estimate from QuickNode: ${constrainedFee} microlamports per compute unit`);
+    const constrainedFee = Math.min(Math.max(medianFee, DEFAULT_PRIORITY_FEE), DEFAULT_PRIORITY_FEE * 10);    
     return constrainedFee;
   } catch (error) {
     console.error('Error getting priority fee estimate from QuickNode:', error);
@@ -216,8 +214,6 @@ async function simulateAndGetBudget(
     }),
   ]);
 
-  console.log('computeUnits:', computeUnits);
-
   const computeBudgetIx = getSetComputeUnitLimitInstruction({
     units: Math.ceil(computeUnits * 1.1),
   });
@@ -240,7 +236,6 @@ export async function getComputeBudget(
   priorityLevel: PriorityLevel = 'MEDIUM'
 ): Promise<Instruction<string>[]> {
   try {
-    console.log('calling simulateAndGetBudget');
     const [computeBudgetIx, priorityFeeIx] = await simulateAndGetBudget(
       instructions,
       feePayer,
