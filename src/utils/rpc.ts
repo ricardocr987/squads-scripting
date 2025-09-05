@@ -1,8 +1,10 @@
+import { web3 } from "@coral-xyz/anchor";
 import { 
   createDefaultRpcTransport, 
   createRpc, 
   createSolanaRpcApi,
 } from "@solana/rpc";
+import { config } from "process";
 
 if (!process.env.RPC_URL) {
   throw new Error('RPC_URL is not set');
@@ -21,3 +23,8 @@ export const rpc = createRpc({
   api: solanaApi, 
   transport: quicknodeRpcTransport 
 });
+
+export const solanaConnection = new web3.Connection(
+  process.env.RPC_URL,
+  'confirmed'
+);

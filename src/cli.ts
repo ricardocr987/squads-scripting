@@ -43,7 +43,7 @@ const scripts: ScriptOption[] = [
   {
     id: 'propose',
     name: '💸 Create Payment Proposal',
-    description: 'Propose a USDC payment transaction for multisig approval',
+    description: 'Propose a SOL or USDC payment transaction for multisig approval',
     requiresConfig: true,
     function: proposeMain
   },

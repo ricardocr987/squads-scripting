@@ -1,23 +1,18 @@
+import * as multisig from '@sqds/multisig';
+import { fetchMultisig  } from './utils/squads/index';
 import { 
-  getVaultTransactionExecuteInstruction,
-  fetchMultisig,
-  getProposalPda,
-  getVaultTransactionPda,
-} from './utils/squads/index';
-import { 
-  AccountRole,
   address, 
-  createSignerFromKeyPair,
   getAddressFromPublicKey
 } from '@solana/kit';
-import { loadWalletFromConfig } from './utils/config';
+import { loadWalletFromConfig, loadConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
 import { prompt, promptWalletChoice, promptYesNo } from './utils/prompt';
-import { signAndSendTransaction } from './utils/sign';
-import { rpc } from './utils/rpc';
+import { solanaConnection, rpc } from './utils/rpc';
+import { sendAndConfirmTransaction } from './utils/web3js';
+import { Keypair, PublicKey, Transaction } from '@solana/web3.js';
 
 async function executePaymentTransaction(
-  executor: CryptoKeyPair,
+  executor: Keypair,
   multisigPda: string,
   transactionIndex: bigint
 ): Promise<void> {
@@ -25,47 +20,57 @@ async function executePaymentTransaction(
   
   try {
     // Get the proposal and transaction PDAs
-    const [proposalPda] = await getProposalPda(multisigPda, transactionIndex);
-    const [transactionPda] = await getVaultTransactionPda(multisigPda, transactionIndex);
-    const executorAddress = await getAddressFromPublicKey(executor.publicKey);
-    const signer = await createSignerFromKeyPair(executor);
+    const [proposalPda] = multisig.getProposalPda({
+      multisigPda: new PublicKey(multisigPda),
+      transactionIndex: transactionIndex,
+    });
+    const [transactionPda] = multisig.getTransactionPda({
+      multisigPda: new PublicKey(multisigPda),
+      index: transactionIndex,
+    });
+    const executorAddress = executor.publicKey.toString();
     
     console.log(`📋 Multisig Address: ${multisigPda}`);
-    console.log(`📋 Proposal Address: ${proposalPda}`);
-    console.log(`📋 Transaction Address: ${transactionPda}`);
+    console.log(`📋 Proposal Address: ${proposalPda.toString()}`);
+    console.log(`📋 Transaction Address: ${transactionPda.toString()}`);
     console.log(`📋 Transaction Index: ${transactionIndex}`);
     console.log(`👤 Executor: ${executorAddress}`);
     
-    // Create execution instruction using Squads utils
-    const executeInstruction = getVaultTransactionExecuteInstruction({
-      multisig: address(multisigPda),
-      proposal: address(proposalPda),
-      transaction: address(transactionPda),
-      member: signer,
+    // Create execution instruction using @sqds/multisig
+    const executeInstructionResult = await multisig.instructions.vaultTransactionExecute({
+      connection: solanaConnection,
+      multisigPda: new PublicKey(multisigPda),
+      transactionIndex: transactionIndex,
+      member: executor.publicKey,
     });
+
+    console.log('📋 Execute instruction:', executeInstructionResult);
+
+    console.log('📋 Execute instruction result:', executeInstructionResult);
     
     console.log('📤 Sending execution transaction...');
-    console.log('🔍 Instruction details:', {
-      programAddress: executeInstruction.programAddress,
-      accountsCount: executeInstruction.accounts?.length || 0,
-      accounts: executeInstruction.accounts?.map(acc => ({
-        address: acc.address,
-        isSigner: acc.role === AccountRole.WRITABLE_SIGNER,  
-      })) || [],
-      dataLength: executeInstruction.data?.length || 0,
-    });
-    const signature = await signAndSendTransaction(
-      [executeInstruction],
-      [executor],
-      executorAddress
+    
+    const executeTx = new Transaction().add(executeInstructionResult.instruction);
+    executeTx.recentBlockhash = (
+      await solanaConnection.getLatestBlockhash()
+    ).blockhash;
+    executeTx.feePayer = new PublicKey(executorAddress);
+
+    const signature = await sendAndConfirmTransaction(
+      solanaConnection,
+      executeTx,
+      [executor]
     );
     
     console.log(`✅ Execution successful!`);
     console.log(`🔗 Transaction: ${signature}`);
-    console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}`);
+    console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
     
   } catch (error) {
     console.error('❌ Execution failed:', error);
+    if (error && typeof error === 'object' && 'logs' in error) {
+      console.error('Transaction logs:', (error as any).logs);
+    }
     throw error;
   }
 }
@@ -95,9 +100,16 @@ async function main() {
     // Get executor choice (only manager can execute)
     console.log('Note: Only Manager can execute transactions');
     const executorChoice = await promptWalletChoice('Which wallet to use for execution?');
-    const executor = await loadWalletFromConfig(executorChoice);
-    const signerAddress = await getAddressFromPublicKey(executor.publicKey);
-    console.log(`👤 Using ${executorChoice === 'manager' ? 'Manager' : executorChoice === 'voter1' ? 'Voter1' : 'Voter2'} as Executor: ${signerAddress}`);
+    const executorCryptoKeyPair = await loadWalletFromConfig(executorChoice);
+    const executorAddress = await getAddressFromPublicKey(executorCryptoKeyPair.publicKey);
+    const configData = await loadConfig();
+    
+    // Convert CryptoKeyPair to Keypair for @sqds/multisig
+    const executor = Keypair.fromSecretKey(
+      new Uint8Array(Buffer.from(configData[executorChoice]?.privateKey || '', 'base64'))
+    );
+    
+    console.log(`👤 Using ${executorChoice === 'manager' ? 'Manager' : executorChoice === 'voter1' ? 'Voter1' : 'Voter2'} as Executor: ${executorAddress}`);
     
     // Confirm execution
     const confirm = await promptYesNo('Are you sure you want to execute this transaction?');

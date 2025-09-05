@@ -17,6 +17,8 @@
     "@codama/renderers": "^1.0.32",
     "@coral-xyz/anchor": "^0.31.1",
     "@solana-program/compute-budget": "^0.9.0",
+    "@solana/web3.js": "^1.98.4",
+    "@sqds/multisig": "^2.1.4",
     "codama": "^1.3.4",
     "lodash": "^4.17.21"
   },
