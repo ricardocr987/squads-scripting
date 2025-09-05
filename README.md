@@ -117,7 +117,7 @@ Comprehensive multisig setup with automated funding and configuration.
 - **Wallet generation** - Creates manager and voter keypairs
 - **SOL airdrop** - Requests devnet SOL
 - **USDC funding guidance** - Provides Circle faucet instructions
-- **Multisig creation** - Sets up controlled multisig with proper permissions
+- **Controlled multisig creation** - Sets up controlled multisig with Config Authority
 - **Vault funding** - Deposits SOL and USDC to multisig vault
 - **Voter Funding** - Sends 0.001 SOL to each voter for transaction fees
 
@@ -141,6 +141,95 @@ const multisigConfig = {
     }
   ]
 };
+```
+
+### ⚙️ Controlled Multisig Configuration (`config.ts`)
+
+**Configuration Features:**
+- **Direct management** - No voting required for config changes (Controlled Multisig only)
+- **Member management** - Add/remove members with custom permissions
+- **Spending limits** - Create and manage token spending limits
+- **Rent collector** - Set account for rent collection
+- **Interactive interface** - User-friendly configuration menu
+
+**For Regular Multisigs (Non-Controlled):**
+If your multisig is NOT controlled, these configuration changes would require a **Config Transaction** instead:
+1. **Create Config Transaction** - Propose the configuration change
+2. **Approve by Threshold** - Members vote to approve the change
+3. **Execute Transaction** - Execute the approved configuration change
+
+This follows the same lifecycle as payment proposals: **Propose → Approve → Execute**.
+
+**Available Operations:**
+```typescript
+1. AddMember - Add new members with custom permissions
+2. RemoveMember - Remove existing members
+3. SetRentCollector - Configure rent collection
+4. AddSpendingLimit - Create token spending limits
+5. RemoveSpendingLimit - Remove spending limits
+6. ViewInfo - Display current configuration
+7. Exit - Exit the config tool
+```
+
+**Member Permission System:**
+```typescript
+// Permission bitmask system
+const permissions = {
+  mask: 7  // 0b111 = All permissions
+  // Bit 0: Propose permission
+  // Bit 1: Vote permission  
+  // Bit 2: Execute permission
+};
+
+// Common permission combinations
+const PROPOSE_ONLY = 1;  // 0b001
+const VOTE_ONLY = 2;     // 0b010
+const EXECUTE_ONLY = 4;  // 0b100
+const ALL_PERMISSIONS = 7; // 0b111
+```
+
+**Spending Limit Creation:**
+```typescript
+const instruction = getMultisigAddSpendingLimitInstruction({
+  multisig: address(multisigPda),
+  configAuthority: signer,
+  spendingLimit: address(spendingLimitPda),
+  rentPayer: signer,
+  systemProgram: address('11111111111111111111111111111111'),
+  createKey: address(createKeyAddress),
+  vaultIndex,
+  mint: address(mint),
+  amount,
+  period,
+  members: members.map(addr => address(addr)),
+  destinations: destinations.map(addr => address(addr)),
+  memo: memo || null
+});
+```
+
+### 📊 Comprehensive Information Dashboard (`info.ts`)
+
+Advanced multisig monitoring and analysis system.
+
+**Dashboard Features:**
+- **Real-time vault balances** - SOL and USDC holdings
+- **Member analysis** - Permission breakdown and role identification
+- **Transaction history** - Complete transaction lifecycle tracking
+- **Status monitoring** - Active, approved, executed, rejected transactions
+
+**Transaction Analysis:**
+```typescript
+// Comprehensive transaction status tracking
+const transactions = await Promise.all(
+  Array.from({ length: lastTransactionIndex }, (_, i) => 
+    fetchTransactionInfo(multisigAddress, i + 1)
+  )
+);
+
+// Status categorization
+const activeTransactions = transactions.filter(tx => tx.status === 'Active' && !tx.isStale);
+const approvedTransactions = transactions.filter(tx => tx.status === 'Approved' && !tx.isStale);
+const executedTransactions = transactions.filter(tx => tx.status === 'Executed');
 ```
 
 ### 💸 Payment Proposal System (`propose.ts`)
@@ -353,89 +442,42 @@ const canClose = isStale ||
 5. **Confirm action** - User confirms cleanup
 6. **Execute cleanup** - Closes selected transactions
 
-### ⚙️ Controlled Multisig Configuration (`config.ts`)
+### 💰 Transfer to Treasury (`transfer.ts`)
 
-Direct multisig configuration management for controlled multisigs (no voting required).
+Direct transfers to the multisig vault for funding operations.
 
-**Configuration Features:**
-- **Direct management** - No voting required for config changes
-- **Member management** - Add/remove members with custom permissions
-- **Spending limits** - Create and manage token spending limits
-- **Rent collector** - Set account for rent collection
-- **Interactive interface** - User-friendly configuration menu
+**Transfer Features:**
+- **SOL transfers** - Direct SOL deposits to multisig vault
+- **USDC transfers** - Token transfers to vault's USDC account
+- **Balance validation** - Ensures sufficient funds before transfer
+- **Transaction confirmation** - Verifies successful transfers
 
-**Available Operations:**
+**Transfer Implementation:**
 ```typescript
-1. AddMember - Add new members with custom permissions
-2. RemoveMember - Remove existing members
-3. SetRentCollector - Configure rent collection
-4. AddSpendingLimit - Create token spending limits
-5. RemoveSpendingLimit - Remove spending limits
-6. ViewInfo - Display current configuration
-7. Exit - Exit the config tool
-```
-
-**Member Permission System:**
-```typescript
-// Permission bitmask system
-const permissions = {
-  mask: 7  // 0b111 = All permissions
-  // Bit 0: Propose permission
-  // Bit 1: Vote permission  
-  // Bit 2: Execute permission
-};
-
-// Common permission combinations
-const PROPOSE_ONLY = 1;  // 0b001
-const VOTE_ONLY = 2;     // 0b010
-const EXECUTE_ONLY = 4;  // 0b100
-const ALL_PERMISSIONS = 7; // 0b111
-```
-
-**Spending Limit Creation:**
-```typescript
-const instruction = getMultisigAddSpendingLimitInstruction({
-  multisig: address(multisigPda),
-  configAuthority: signer,
-  spendingLimit: address(spendingLimitPda),
-  rentPayer: signer,
-  systemProgram: address('11111111111111111111111111111111'),
-  createKey: address(createKeyAddress),
-  vaultIndex,
-  mint: address(mint),
-  amount,
-  period,
-  members: members.map(addr => address(addr)),
-  destinations: destinations.map(addr => address(addr)),
-  memo: memo || null
+// SOL transfer to vault
+const transferInstruction = SystemProgram.transfer({
+  fromPubkey: new PublicKey(senderAddress),
+  toPubkey: new PublicKey(vaultPda),
+  lamports: transferAmount,
 });
-```
 
-
-### 📊 Comprehensive Information Dashboard (`info.ts`)
-
-Advanced multisig monitoring and analysis system.
-
-**Dashboard Features:**
-- **Real-time vault balances** - SOL and USDC holdings
-- **Member analysis** - Permission breakdown and role identification
-- **Transaction history** - Complete transaction lifecycle tracking
-- **Status monitoring** - Active, approved, executed, rejected transactions
-
-**Transaction Analysis:**
-```typescript
-// Comprehensive transaction status tracking
-const transactions = await Promise.all(
-  Array.from({ length: lastTransactionIndex }, (_, i) => 
-    fetchTransactionInfo(multisigAddress, i + 1)
-  )
+// USDC transfer to vault
+const transferInstruction = createTransferInstruction(
+  senderTokenAccount,
+  vaultTokenAccount,
+  new PublicKey(senderAddress),
+  transferAmount,
+  [],
+  TOKEN_PROGRAM_ID
 );
-
-// Status categorization
-const activeTransactions = transactions.filter(tx => tx.status === 'Active' && !tx.isStale);
-const approvedTransactions = transactions.filter(tx => tx.status === 'Approved' && !tx.isStale);
-const executedTransactions = transactions.filter(tx => tx.status === 'Executed');
 ```
+
+**Transfer Workflow:**
+1. **Load vault data** - Fetches vault address and current balances
+2. **Validate sender balance** - Ensures sufficient funds for transfer
+3. **Create transfer instruction** - Generates appropriate transfer instruction
+4. **Sign and send** - Signs transaction and submits to network
+5. **Confirm transfer** - Verifies successful completion
 
 ### @solana/kit Integration
 
