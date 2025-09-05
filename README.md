@@ -281,10 +281,26 @@ const transferInstruction = createTransferInstruction(
 ```
 
 **Transaction Flow:**
-1. **Vault Transaction Creation** - Creates the actual transfer instruction
-2. **Proposal Creation** - Makes the transaction available for voting
-3. **Instruction Conversion** - Converts web3.js instructions to @solana/kit format
-4. **Sign and Send** - Signs transaction and submits to network using utility function
+1. **Vault Transaction Creation** - Creates the actual transfer instruction using Squads SDK
+2. **Proposal Creation** - Makes the transaction available for voting using Codama-generated instructions
+3. **Instruction Conversion** - Converts Squads SDK (web3.js) instructions to @solana/kit format using `fromLegacyTransactionInstruction`
+4. **Sign and Send** - Signs transaction and submits to network using unified @solana/kit utility function
+
+**Instruction Conversion Pattern:**
+```typescript
+// Squads SDK returns web3.js TransactionInstruction
+const vaultTransaction = multisig.instructions.vaultTransactionCreate({...});
+
+// Convert to @solana/kit format for unified handling
+const vaultInstruction = fromLegacyTransactionInstruction(vaultTransaction);
+
+// Use with @solana/kit transaction utilities
+const signature = await signAndSendTransaction(
+  [vaultInstruction as Instruction<string>],
+  [proposer],
+  proposerAddress
+);
+```
 
 ### ✅ Approval Management (`approve.ts`)
 
@@ -326,7 +342,7 @@ Execution of approved transactions with comprehensive validation.
 
 **Execution Implementation:**
 ```typescript
-// Create execution instruction using Squads SDK
+// Create execution instruction using Squads SDK (returns web3.js format)
 const executeInstructionResult = await multisig.instructions.vaultTransactionExecute({
   connection: solanaConnection,
   multisigPda: new PublicKey(multisigPda),
@@ -334,15 +350,30 @@ const executeInstructionResult = await multisig.instructions.vaultTransactionExe
   member: new PublicKey(executorAddress),
 });
 
-// Convert to @solana/kit format with @solana/compat
+// Convert to @solana/kit format using @solana/compat
 const vaultInstruction = fromLegacyTransactionInstruction(executeInstructionResult.instruction);
+
+// Use unified @solana/kit transaction handling
+const signature = await signAndSendTransaction(
+  [vaultInstruction as Instruction<string>],
+  [executor],
+  executorAddress
+);
 ```
+
+**Why Instruction Conversion is Needed:**
+- **Squads SDK** uses `@solana/web3.js` internally for complex instruction creation
+- **@solana/kit** provides modern, type-safe transaction building and RPC interactions
+- **`fromLegacyTransactionInstruction`** bridges the gap between these two ecosystems
+- **Unified API** allows all instructions to flow through the same transaction pipeline
 
 **Execution Workflow:**
 1. **Load transaction data** - Fetches proposal and transaction PDAs
 2. **Validate approvals** - Ensures sufficient votes for execution
 3. **Check permissions** - Verifies executor has execution rights
-4. **Execute transaction** - Creates instruction, signs and submits to network using utility function
+4. **Create instruction** - Uses Squads SDK for complex execution logic
+5. **Convert format** - Transforms web3.js instruction to @solana/kit format
+6. **Execute transaction** - Signs and submits using unified @solana/kit utilities
 
 ### 🚫 Interactive Rejection System (`reject.ts`)
 
@@ -476,18 +507,168 @@ const transferInstruction = createTransferInstruction(
 4. **Sign and send** - Signs transaction and submits to network using utility function
 5. **Confirm transfer** - Verifies successful completion
 
-### @solana/kit Integration
+### @solana/kit Integration & Instruction Conversion Strategy
 
-Unified API for all Solana operations:
+This system uses a **hybrid approach** that combines the best of both worlds: **@solana/web3.js** for complex instruction creation and **@solana/kit** for modern transaction handling.
+
+#### Instruction Conversion Pattern
+
+The codebase uses `fromLegacyTransactionInstruction` from `@solana/compat` to bridge between different instruction formats:
+
+```typescript
+import { fromLegacyTransactionInstruction } from '@solana/compat';
+
+// Convert web3.js/Squads SDK instructions to @solana/kit format
+const vaultInstruction = fromLegacyTransactionInstruction(legacyInstruction);
+```
+
+#### Why This Pattern?
+
+**@solana/web3.js** excels at:
+- **Complex instruction creation** (Squads SDK, SPL Token operations)
+- **Transaction message serialization** with proper account handling
+- **Mature ecosystem** with extensive library support
+
+**@solana/kit** excels at:
+- **Type-safe transaction building** with functional composition
+- **Modern RPC interactions** with automatic serialization
+- **Unified API** for transaction preparation and signing
+
+#### Implementation Examples
+
+**1. Squads SDK Integration (propose.ts, execute.ts):**
+```typescript
+// Create instruction using Squads SDK (returns web3.js format)
+const vaultTransaction = multisig.instructions.vaultTransactionCreate({
+  multisigPda: new PublicKey(multisigPda),
+  transactionIndex: newTransactionIndex,
+  creator: new PublicKey(proposerAddress),
+  vaultIndex: 0,
+  ephemeralSigners: 0,
+  transactionMessage: new TransactionMessage({
+    payerKey: new PublicKey(proposerAddress),
+    recentBlockhash: (await solanaConnection.getLatestBlockhash()).blockhash,
+    instructions: instructions, // web3.js instructions
+  }),
+  memo: `Payment of ${amount} ${paymentType} to ${recipientAddress}`,
+});
+
+// Convert to @solana/kit format for unified transaction handling
+const vaultInstruction = fromLegacyTransactionInstruction(vaultTransaction);
+
+// Use @solana/kit for transaction preparation and signing
+const signature = await signAndSendTransaction(
+  [vaultInstruction as Instruction<string>],
+  [proposer],
+  proposerAddress
+);
+```
+
+**2. Codama Generated Instructions (approve.ts, reject.ts):**
+```typescript
+// Codama generates @solana/kit compatible instructions directly
+const approveInstruction = getProposalApproveInstruction({
+  multisig: address(multisigPda),
+  proposal: address(proposalPda),
+  member: await createSignerFromKeyPair(voter),
+  args: { memo: `Approved by ${voterAddress}` }
+});
+
+// No conversion needed - use directly with @solana/kit
+const signature = await signAndSendTransaction(
+  [approveInstruction],
+  [voter],
+  voterAddress
+);
+```
+
+**3. SPL Token Operations (propose.ts):**
+```typescript
+// Create web3.js instructions for complex token operations
+const createTokenAccountInstruction = createAssociatedTokenAccountInstruction(
+  new PublicKey(vaultPda),
+  recipientTokenAccount,
+  new PublicKey(recipientAddress),
+  new PublicKey(USDC_MINT),
+  TOKEN_PROGRAM_ID,
+  ASSOCIATED_TOKEN_PROGRAM_ID
+);
+
+const transferInstruction = createTransferInstruction(
+  vaultTokenAccount,
+  recipientTokenAccount,
+  new PublicKey(vaultPda),
+  transferAmount,
+  [],
+  TOKEN_PROGRAM_ID
+);
+
+// Bundle in TransactionMessage for Squads SDK
+const transactionMessage = new TransactionMessage({
+  payerKey: new PublicKey(proposerAddress),
+  recentBlockhash: (await solanaConnection.getLatestBlockhash()).blockhash,
+  instructions: [createTokenAccountInstruction, transferInstruction],
+});
+```
+
+#### Unified Transaction Handling
+
+All instructions, regardless of source, flow through the same `@solana/kit` pipeline:
 
 ```typescript
 // Transaction preparation and sending with @solana/kit utility
 const signature = await signAndSendTransaction(
-  [instruction],
+  [instruction], // Can be from Squads SDK, Codama, or web3.js
   [signer],
   payerAddress
 );
 ```
+
+#### Technical Details: Instruction Serialization
+
+**The Challenge:**
+Different Solana libraries use different instruction formats and serialization methods:
+
+- **@solana/web3.js**: Uses `TransactionInstruction` with `PublicKey` accounts and `Buffer` data
+- **@solana/kit**: Uses `Instruction<TProgram>` with `Address` accounts and `ReadonlyUint8Array` data
+- **Squads SDK**: Built on web3.js, returns web3.js format instructions
+- **Codama**: Generates @solana/kit compatible instructions directly
+
+**The Solution:**
+`fromLegacyTransactionInstruction` handles the conversion automatically:
+
+```typescript
+// Input: web3.js TransactionInstruction
+{
+  programId: PublicKey,
+  keys: AccountMeta[],
+  data: Buffer
+}
+
+// Output: @solana/kit Instruction<string>
+{
+  programAddress: Address,
+  accounts: AccountMeta[],
+  data: ReadonlyUint8Array
+}
+```
+
+**Serialization Benefits:**
+- **Automatic conversion** of account keys from `PublicKey` to `Address`
+- **Data format handling** from `Buffer` to `ReadonlyUint8Array`
+- **Account meta preservation** maintains all account metadata
+- **Type safety** ensures compatibility with @solana/kit's type system
+
+#### Benefits of This Approach
+
+1. **Leverage Best Tools** - Use each library for its strengths
+2. **Type Safety** - Maintain @solana/kit's type safety throughout
+3. **Consistent API** - All transactions use the same preparation/signing flow
+4. **Future-Proof** - Easy to migrate individual components as libraries evolve
+5. **Serialization Compatibility** - Handles complex instruction serialization automatically
+6. **Transaction Message Handling** - Properly serializes complex transaction messages from Squads SDK
+
+#### PDA Derivation & Account Management
 
 ```typescript
 // PDA derivation for multisig operations

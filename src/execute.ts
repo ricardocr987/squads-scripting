@@ -21,6 +21,7 @@ import { rpc, solanaConnection } from './utils/rpc';
 import { PublicKey } from '@solana/web3.js';
 import * as multisig from '@sqds/multisig';
 import { fromLegacyTransactionInstruction } from '@solana/compat';
+import { signAndSendTransaction } from './utils/sign';
 
 async function executePaymentTransaction(
   executor: CryptoKeyPair,
@@ -53,23 +54,12 @@ async function executePaymentTransaction(
 
     console.log('📤 Preparing execution transaction...');
     
-    // Prepare transaction using @solana/kit
-    const transaction = await prepareTransaction(
+    // Prepare transaction using @solana/kit    
+    const signature = await signAndSendTransaction(
       [vaultInstruction as Instruction<string>],
+      [executor],
       executorAddress
     );
-    
-    // Sign transaction
-    const signedTransaction = await signTransaction(
-      [executor],
-      transaction
-    );
-
-    // Get wire transaction
-    const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
-    
-    console.log('📤 Sending execution transaction...');
-    const signature = await sendTransaction(wireTransaction);
     
     console.log(`✅ Execution successful!`);
     console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/tx/${signature}?cluster=devnet`);
