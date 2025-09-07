@@ -158,7 +158,7 @@ const keypair = await crypto.subtle.generateKey(
 - **Devnet Funding:** Automatically requests SOL airdrops and provides guidance for USDC funding through Circle's faucet.
 
 ```typescript
-export const LAMPORTS_PER_SOL = 1_000_000_000;
+const LAMPORTS_PER_SOL = 1_000_000_000;
 const airdropAmount = BigInt(2 * LAMPORTS_PER_SOL)); // 2 SOL from faucet
 const signature = await rpc.requestAirdrop(address(manager), lamports(airdropAmount).send();
 ```
