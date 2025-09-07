@@ -6,6 +6,7 @@ import {
     type Instruction,
     createSignerFromKeyPair
 } from '@solana/kit';
+import { SYSTEM_PROGRAM_ADDRESS } from '@solana-program/system';
 import { fromLegacyTransactionInstruction } from '@solana/compat';
 import { 
     getVaultPda,
@@ -189,7 +190,7 @@ async function proposePaymentTransaction(
       proposal: address(proposalPda),
       creator: await createSignerFromKeyPair(proposer),
       rentPayer: await createSignerFromKeyPair(proposer),
-      systemProgram: address('11111111111111111111111111111111'),
+      systemProgram: SYSTEM_PROGRAM_ADDRESS,
       transactionIndex: newTransactionIndex,
       draft: false, // This ensures the proposal is active and ready for voting
     });
