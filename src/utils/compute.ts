@@ -53,7 +53,6 @@ const DEFAULT_PRIORITY_FEE = 50000;
 async function getComputeUnits(
   wireTransaction: Base64EncodedWireTransaction
 ): Promise<number> {
-  console.log('wireTransaction', wireTransaction.length)
   const simulation = await rpc
     .simulateTransaction(wireTransaction, {
       sigVerify: false,
