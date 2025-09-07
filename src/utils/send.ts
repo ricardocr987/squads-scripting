@@ -18,9 +18,9 @@ async function sendRawTransaction(wireTransaction: Base64EncodedWireTransaction)
  * Confirms a transaction signature using retry-based polling approach
  */
 async function confirmSignature(signature: Signature): Promise<string> {
-  const MAX_RETRIES = 7;
+  const MAX_RETRIES = 9;
   const RETRY_INTERVAL = 1000; // 1000ms between retries
-  const TIMEOUT_DURATION = 8000; // 8 seconds total timeout
+  const TIMEOUT_DURATION = 10000; // 10 seconds total timeout
   
   console.log(`Starting confirmation for signature: ${signature}`);
   
