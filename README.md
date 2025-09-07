@@ -143,8 +143,10 @@ This configuration creates a 2-of-3 multisig where the manager has full control,
 
 The initialization process handles several critical tasks:
 
-- **Keypair Generation:** Creates secure keypairs for all participants using Web Crypto API primitives written on a config.json file.
+- **Keypair Generation:** Creates secure keypairs for all participants using Web Crypto API primitives.
 
+  **Security Warning:** The `extractable: true` parameter and file-based storage are used here for development simplicity. More [info](https://solana.stackexchange.com/questions/17378/how-to-generate-and-save-a-keypair-with-solana-kit-solana-web3-js-v2)
+  
 ```typescript
 const keypair = await crypto.subtle.generateKey(
   'Ed25519',
@@ -156,7 +158,8 @@ const keypair = await crypto.subtle.generateKey(
 - **Devnet Funding:** Automatically requests SOL airdrops and provides guidance for USDC funding through Circle's faucet.
 
 ```typescript
-const airdropAmount = BigInt(2 * 1000000000)); // 2 SOL from faucet
+export const LAMPORTS_PER_SOL = 1_000_000_000;
+const airdropAmount = BigInt(2 * LAMPORTS_PER_SOL)); // 2 SOL from faucet
 const signature = await rpc.requestAirdrop(address(manager), lamports(airdropAmount).send();
 ```
 
@@ -166,7 +169,7 @@ const signature = await rpc.requestAirdrop(address(manager), lamports(airdropAmo
 // Get vault PDA (index 0)
 const [vaultPda] = await getVaultPda(multisigPda, 0);
 // Create SOL transfer instruction to vault
-const transferAmount = BigInt(0.01 * 1000000000); // 0.01 SOL in lamports
+const transferAmount = BigInt(0.01 * LAMPORTS_PER_SOL); // 0.01 SOL in lamports
 const signer = await createSignerFromKeyPair(sender);
 const transferIxns = await transferInstruction(signer, transferAmount, SOL_MINT, vaultPda):
 const signature = await signAndSendTransaction(transferIxns, [sender], senderAddress);
@@ -259,7 +262,7 @@ const instruction = getMultisigAddMemberInstruction({
   multisig: address(multisigPda),
   configAuthority: signer,
   rentPayer: signer,
-  systemProgram: address('11111111111111111111111111111111'),
+  systemProgram: SYSTEM_PROGRAM_ADDRESS,
   newMember: memberArgs,
   memo: memo || null
 });
