@@ -1,15 +1,13 @@
 # How to Use Squads Multisig Wallets with Solana Kit
 
-Multisig wallets are essential for secure fund management in the crypto ecosystem. Squads v4 provides a powerful multisig solution on Solana, but integrating it with modern development tools can be challenging. This guide walks you through building a complete multisig management system using Squads with Solana Kit, demonstrating how to create, manage, and execute multisig transactions in a type-safe environment.
-
-You'll build a full-featured CLI application that handles the entire multisig lifecycle: initialization, member management, proposal creation, voting, and execution. Learn how to leverage Solana Kit's modern APIs alongside Squads' powerful multisig capabilities to create a robust treasury management system.
+Multisig wallets are essential for secure fund management in the crypto ecosystem. Squads v4 provides a powerful multisig solution on Solana, but integrating it with modern development tools can be challenging. This guide walks you through building a complete multisig management system using Squads with Solana Kit. You'll build a full-featured CLI application that handles the entire multisig lifecycle: initialization, member management, proposal creation, voting, and execution, while learning how to leverage Solana Kit's modern APIs alongside Squads' powerful multisig capabilities to create a robust treasury management system.
 
 ## Prerequisites
 
 Before diving into this tutorial, you should have:
 
 - **Basic understanding of Solana development** - Familiarity with accounts, programs and transactions
-- **TypeScript knowledge** - The codebase is written in TypeScript with type safety
+- **TypeScript knowledge** - The codebase is written in TypeScript
 - **Bun installed** - We'll use Bun as our runtime for its performance (https://bun.com/docs/installation)
 - **A Solana devnet RPC endpoint** - We'll be working exclusively on devnet for development purposes
 - **Understanding of multisig concepts** - What multisig wallets are and why they're important
@@ -143,6 +141,18 @@ This configuration creates a 2-of-3 multisig where the manager has full control,
 
 The initialization process handles several critical tasks:
 
+- **Transaction Building:** Uses Codama-generated instructions with Solana Kit's transaction utilities:
+
+```typescript
+// Prepare the isntruction with codama generated utils
+const multisigCreateInstruction = getMultisigCreateV2Instruction(multisigConfig);
+// Send and confirm transaction using solana/kit utilities
+const transaction = await prepareTransaction([multisigCreateInstruction], feePayer);
+const signedTransaction = await signTransaction(signers, transaction);
+const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+await sendTransaction(wireTransaction);
+```
+
 - **Keypair Generation:** Creates secure keypairs for all participants using Web Crypto API primitives.
 
   **Security Warning:** The `extractable: true` parameter and file-based storage are used here for development simplicity. More [info](https://solana.stackexchange.com/questions/17378/how-to-generate-and-save-a-keypair-with-solana-kit-solana-web3-js-v2)
@@ -173,18 +183,6 @@ const transferAmount = BigInt(0.01 * LAMPORTS_PER_SOL); // 0.01 SOL in lamports
 const signer = await createSignerFromKeyPair(sender);
 const transferIxns = await transferInstruction(signer, transferAmount, SOL_MINT, vaultPda):
 const signature = await signAndSendTransaction(transferIxns, [sender], senderAddress);
-```
-
-- **Transaction Building:** Uses Codama-generated instructions with Solana Kit's transaction utilities:
-
-```typescript
-// Prepare the isntruction with codama generated utils
-const multisigCreateInstruction = getMultisigCreateV2Instruction(multisigConfig);
-// Send and confirm transaction using solana/kit utilities
-const transaction = await prepareTransaction([multisigCreateInstruction], feePayer);
-const signedTransaction = await signTransaction(signers, transaction);
-const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
-await sendTransaction(wireTransaction);
 ```
 
 ### Step 2: Creating Payment Proposals
