@@ -34,6 +34,7 @@ import { prompt } from './utils/prompt';
 import { sendTransaction } from './utils/send';
 import { USDC_MINT_DEVNET as USDC_MINT } from './utils/constants';
 import { solanaConnection, rpc } from './utils/rpc';
+import { checkSolBalance, checkUSDCBalance } from './utils/balance';
 
 async function proposePaymentTransaction(
   proposer: CryptoKeyPair,
@@ -273,6 +274,13 @@ async function main() {
       console.log('❌ Invalid choice. Please select 1 for SOL or 2 for USDC.');
       process.exit(1);
     }
+    
+    // Get vault address and display vault balances before prompting for amount
+    const [vaultPda] = await getVaultPda(multisigAddress, 0);
+    console.log('\n💰 Multisig Vault Balances:');
+    const vaultSolBalance = await checkSolBalance(address(vaultPda));
+    const vaultUsdcBalance = await checkUSDCBalance(address(vaultPda));
+    console.log(`🏛️  ${vaultPda.slice(0, 8)}...: ${vaultSolBalance.toFixed(4)} SOL, ${vaultUsdcBalance.toFixed(4)} USDC`);
     
     const amountInput = await prompt(`Enter payment amount in ${paymentType}: `);
     const amount = parseFloat(amountInput);

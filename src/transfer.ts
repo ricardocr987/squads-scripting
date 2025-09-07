@@ -10,7 +10,7 @@ import { transferInstruction } from './utils/transfer';
 import { loadWalletFromConfig, loadMultisigAddressFromConfig } from './utils/config';
 import { prompt } from './utils/prompt';
 import { signAndSendTransaction } from './utils/sign';
-import { checkSolBalance } from './utils/balance';
+import { checkSolBalance, checkUSDCBalance } from './utils/balance';
 import { USDC_MINT_DEVNET as USDC_MINT } from './utils/constants';
 
 
@@ -78,7 +78,8 @@ async function main() {
     
     // Check SOL balance
     const solBalance = await checkSolBalance(senderAddress);
-    console.log(`💰 Current SOL balance: ${solBalance.toFixed(4)} SOL`);
+    const usdcBalance = await checkUSDCBalance(senderAddress);
+    console.log(`💰 Current balances: ${solBalance.toFixed(4)} SOL, ${usdcBalance.toFixed(2)} USDC`);
     
     if (solBalance < 0.01) {
       console.log('❌ Insufficient SOL balance. Please send more SOL to the sender wallet.');
