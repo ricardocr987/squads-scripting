@@ -16,7 +16,7 @@ Before diving into this tutorial, you should have:
 
 - [Squads Documentation](https://docs.squads.so/main) - Main Squads documentation
 - [Squads v4 SDK](https://v4-sdk-typedoc.vercel.app/) - Complete SDK reference
-- [Solana Kit Documentation](https://solana-kit.com/) - Modern Solana development tools
+- [Solana Kit Documentation](https://www.solanakit.com/) - Modern Solana development tools
 - [Codama Documentation](https://codama.idl.dev/) - IDL client generation
 
 ## Setting Up the Development Environment
