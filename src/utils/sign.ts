@@ -3,33 +3,36 @@
  */
 
 import { 
-  address, 
+  assertIsSendableTransaction,
+  getSignatureFromTransaction,
+  type Instruction,
   signTransaction,
-  getBase64EncodedWireTransaction,
-  type Instruction
 } from '@solana/kit';
+import { sendAndConfirmTransaction } from './rpc';
 import { prepareTransaction } from './prepare';
-import { sendTransaction } from './send';
 
 export async function signAndSendTransaction(
   instructions: Instruction<string>[],
   signers: CryptoKeyPair[],
-  feePayer: string
-): Promise<string> {
-  // Use Solana Kit transaction building
-  const transaction = await prepareTransaction(
-    instructions,
-    feePayer
-  );
+  feePayer: string,
+  commitment: 'processed' | 'confirmed' | 'finalized' = 'confirmed'
+): Promise<string> {  
+  // Create transaction message using the new approach
+  const transactionMessage =  await prepareTransaction(instructions, feePayer);
   
-  // Sign transaction
+  // Sign the transaction message
   const signedTransaction = await signTransaction(
     signers,
-    transaction
+    transactionMessage
   );
+  assertIsSendableTransaction(signedTransaction);
 
-  const wireTransaction = getBase64EncodedWireTransaction(signedTransaction);
+  // Get signature before sending
+  const signature = getSignatureFromTransaction(signedTransaction);
+  console.log(`Transaction signature: ${signature}`);
+
+  // Send and confirm transaction using the factory
+  await sendAndConfirmTransaction(signedTransaction, { commitment });
   
-  // Send and confirm transaction
-  return await sendTransaction(wireTransaction);
+  return signature;
 }

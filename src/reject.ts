@@ -10,7 +10,7 @@ import {
   getAddressFromPublicKey,
   type Address
 } from '@solana/kit';
-import { loadWalletFromConfig } from './utils/config';
+import { loadWalletFromConfig, loadAllSignersFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
 import { signAndSendTransaction } from './utils/sign';
 import { sleep } from 'bun';
@@ -94,6 +94,10 @@ async function main() {
     console.log('🚫 Proposal Rejection Script');
     console.log('============================\n');
     
+    // Load all signers from config
+    console.log('✅ Loading signers from config...');
+    await loadAllSignersFromConfig();
+    
     // Load multisig address from config
     console.log('✅ Loading multisig address...');
     const multisigAddress = await loadMultisigAddressFromConfig();
@@ -124,10 +128,9 @@ async function main() {
     
     // Load the selected member's wallet
     console.log('✅ Loading wallet for signing...');
-    const executor = await loadWalletFromConfig(selectedMember);
-    const signer = await createSignerFromKeyPair(executor);
-    const signerAddress = await getAddressFromPublicKey(executor.publicKey);
-    console.log(`👤 Signer: ${signerAddress}`);
+    const rejector = await loadWalletFromConfig(selectedMember);
+    const rejectorAddress = await getAddressFromPublicKey(rejector.publicKey);
+    console.log(`👤 Rejector Address: ${rejectorAddress}`);
     
     // Confirm rejection
     const confirm = await prompt(`\n🚫 Are you sure you want to reject Proposal #${selectedProposal.index}? (y/N): `);
@@ -143,19 +146,19 @@ async function main() {
       const rejectInstruction = getProposalRejectInstruction({
         multisig: address(multisigAddress),
         proposal: address(selectedProposal.pda),
-        member: signer,
+        member: await createSignerFromKeyPair(rejector),
         args: {
-          memo: `Rejected by ${signerAddress}`,
+          memo: `Rejected by ${selectedMember}`,
         },
       });
 
       console.log('📤 Sending rejection transaction...');
       
-      // Send and confirm transaction using utility function
+      // Send and confirm transaction using rejector
       const signature = await signAndSendTransaction(
         [rejectInstruction],
-        [executor],
-        signerAddress
+        [rejector],
+        rejectorAddress
       );
       
       console.log(`✅ Proposal #${selectedProposal.index} rejected successfully!`);
@@ -169,7 +172,7 @@ async function main() {
     console.log('\n🎉 Proposal rejection completed!');
   } catch (error) {
     console.error('❌ Error rejecting proposal:', error);
-    process.exit(1);
+    throw error; // Let the CLI handle the error gracefully
   }
 }
 

@@ -3,7 +3,16 @@
  * No file I/O operations - all configuration handled by config.ts
  */
 
-import { createKeyPairFromBytes, generateKeyPair, getAddressFromPublicKey } from '@solana/kit';
+import { 
+  createKeyPairFromBytes, 
+  generateKeyPair, 
+  getAddressFromPublicKey,
+  generateKeyPairSigner,
+  createSignerFromKeyPair,
+  type KeyPairSigner,
+  type TransactionSigner,
+  type MessageSigner
+} from '@solana/kit';
 
 export async function generateManagerVoterWallets() {
   console.log('🏗️  Creating Manager and Voter Wallets');
@@ -11,22 +20,25 @@ export async function generateManagerVoterWallets() {
   
   // Generate all keypairs using extractable keys for saving
   console.log('🔑 Generating Manager keypair...');
-  const manager = await generateExtractableKeyPair();
-  const managerAddress = await getAddressFromPublicKey(manager.publicKey);
+  const managerKeypair = await generateExtractableKeyPair();
+  const managerSigner = await createSignerFromKeyPair(managerKeypair);
+  const managerAddress = await getAddressFromPublicKey(managerKeypair.publicKey);
   console.log(`✅ Manager keypair generated`);
   console.log(`📍 Manager Public Key: ${managerAddress}`);
   console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/address/${managerAddress}`);
   
   console.log('🔑 Generating Voter1 keypair...');
-  const voter1 = await generateExtractableKeyPair();
-  const voter1Address = await getAddressFromPublicKey(voter1.publicKey);
+  const voter1Keypair = await generateExtractableKeyPair();
+  const voter1Signer = await createSignerFromKeyPair(voter1Keypair);
+  const voter1Address = await getAddressFromPublicKey(voter1Keypair.publicKey);
   console.log(`✅ Voter1 keypair generated`);
   console.log(`📍 Voter1 Public Key: ${voter1Address}`);
   console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/address/${voter1Address}`);
   
   console.log('🔑 Generating Voter2 keypair...');
-  const voter2 = await generateExtractableKeyPair();
-  const voter2Address = await getAddressFromPublicKey(voter2.publicKey);
+  const voter2Keypair = await generateExtractableKeyPair();
+  const voter2Signer = await createSignerFromKeyPair(voter2Keypair);
+  const voter2Address = await getAddressFromPublicKey(voter2Keypair.publicKey);
   console.log(`✅ Voter2 keypair generated`);
   console.log(`📍 Voter2 Public Key: ${voter2Address}`);
   console.log(`🔗 View on Solana Explorer: https://explorer.solana.com/address/${voter2Address}`);
@@ -37,14 +49,17 @@ export async function generateManagerVoterWallets() {
   console.log(`👤 Voter2: ${voter2Address} (can vote only)`);
 
   // Export the full 64-byte keypair format (32 bytes private + 32 bytes public)
-  const managerKeypairBytes = await exportKeypairBytes(manager);
-  const voter1KeypairBytes = await exportKeypairBytes(voter1);
-  const voter2KeypairBytes = await exportKeypairBytes(voter2);
+  const managerKeypairBytes = await exportKeypairBytes(managerKeypair);
+  const voter1KeypairBytes = await exportKeypairBytes(voter1Keypair);
+  const voter2KeypairBytes = await exportKeypairBytes(voter2Keypair);
   
   return { 
-    manager, 
-    voter1, 
-    voter2,
+    managerKeypair, 
+    voter1Keypair, 
+    voter2Keypair,
+    managerSigner,
+    voter1Signer,
+    voter2Signer,
     managerKeypairBytes,
     voter1KeypairBytes,
     voter2KeypairBytes

@@ -15,22 +15,31 @@ export async function prepareTransaction(
   instructions: Instruction<string>[],
   feePayer: string,
 ) {
-  const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
-  const finalInstructions = await getComputeBudget(
-    instructions,
-    feePayer,
-    {},
-    latestBlockhash
-  );
-  const payer = address(feePayer);
-  const message = pipe(
-    createTransactionMessage({ version: 0 }),
-    tx => setTransactionMessageFeePayer(payer, tx),
-    tx => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
-    tx => appendTransactionMessageInstructions(finalInstructions, tx),
-  );
-  return compileTransaction({
-    ...message,
-    lifetimeConstraint: latestBlockhash,
-  });
+  try {
+    const { value: latestBlockhash } = await rpc.getLatestBlockhash().send();
+    const finalInstructions = await getComputeBudget(
+      instructions,
+      feePayer,
+      {},
+      latestBlockhash
+    );
+    const payer = address(feePayer);
+    const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      tx => setTransactionMessageFeePayer(payer, tx),
+      tx => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, tx),
+      tx => appendTransactionMessageInstructions(finalInstructions, tx),
+    );
+    return compileTransaction({
+      ...message,
+      lifetimeConstraint: latestBlockhash,
+    });
+  } catch (error) {
+    // Pass through simulation errors from compute.ts
+    if (error && typeof error === 'object' && 'isSimulationError' in error && (error as any).isSimulationError) {
+      throw error;
+    }
+    // Re-throw other errors as-is
+    throw error;
+  }
 }

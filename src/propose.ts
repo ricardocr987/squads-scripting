@@ -27,29 +27,24 @@ import {
     TOKEN_PROGRAM_ID,
     ASSOCIATED_TOKEN_PROGRAM_ID
 } from '@solana/spl-token';
-import { loadWalletFromConfig } from './utils/config';
+import { loadWalletFromConfig, loadAllSignersFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
 import { signAndSendTransaction } from './utils/sign';
 import { prompt } from './utils/prompt';
-import { sendTransaction } from './utils/send';
 import { USDC_MINT_DEVNET as USDC_MINT } from './utils/constants';
 import { solanaConnection, rpc } from './utils/rpc';
 import { checkSolBalance, checkUSDCBalance } from './utils/balance';
 
 async function proposePaymentTransaction(
-  proposer: CryptoKeyPair,
   multisigPda: string,
   recipientAddress: string,
   amount: number,
-  paymentType: 'SOL' | 'USDC'
+  paymentType: 'SOL' | 'USDC',
+  proposer: CryptoKeyPair
 ): Promise<void> {
   console.log('\n💸 Creating payment proposal...');
   
   try {
-    // Get proposer address
-    const proposerAddress = await getAddressFromPublicKey(proposer.publicKey);
-    
-    console.log(`📍 Proposer Address: ${proposerAddress}`);
     console.log(`💸 Payment amount: ${amount} ${paymentType}`);
     
     // Get multisig account info to get the next transaction index
@@ -155,6 +150,8 @@ async function proposePaymentTransaction(
       }
     }
     
+    const proposerAddress = await getAddressFromPublicKey(proposer.publicKey);
+    
     // Create the vault transaction using Squads SDK
     const vaultTransaction = multisig.instructions.vaultTransactionCreate({
       multisigPda: new PublicKey(multisigPda),
@@ -175,7 +172,7 @@ async function proposePaymentTransaction(
     // Convert the Squads SDK instruction to @solana/kit format
     const vaultInstruction = fromLegacyTransactionInstruction(vaultTransaction);
     
-    // Send and confirm transaction using utility function
+    // Send and confirm transaction using proposer
     const vaultTxSignature = await signAndSendTransaction(
       [vaultInstruction as Instruction<string>],
       [proposer],
@@ -198,7 +195,7 @@ async function proposePaymentTransaction(
     
     console.log('📤 Creating proposal...');
         
-    // Send and confirm transaction using utility function
+    // Send and confirm transaction using proposer
     const proposalTxSignature = await signAndSendTransaction(
       [createProposalIx],
       [proposer],
@@ -234,18 +231,20 @@ async function main() {
     console.log('💸 Squads Payment Proposal Tool');
     console.log('===============================\n');
     
-    // Load wallet
-    console.log('✅ Loading wallet...');
-    const proposer = await loadWalletFromConfig('manager');
-    const proposerAddress = await getAddressFromPublicKey(proposer.publicKey);
-
-    console.log(`📍 Manager Public Key: ${proposerAddress}`);
+    // Load all signers from config
+    console.log('✅ Loading signers from config...');
+    await loadAllSignersFromConfig();
     
     // Load multisig address from config.json
     console.log('✅ Loading multisig address...');
     const multisigAddress = await loadMultisigAddressFromConfig();
     console.log(`🏛️  Multisig Address: ${multisigAddress}`);
-    
+
+    // Load the manager wallet for proposing
+    const proposer = await loadWalletFromConfig('manager');
+    const proposerAddress = await getAddressFromPublicKey(proposer.publicKey);
+    console.log(`👤 Proposer Address: ${proposerAddress}`);
+        
     const multisigAccount = await fetchMultisig(rpc, address(multisigAddress));
     console.log(`👥 Members: ${multisigAccount.data.members.length}`);
     console.log(`🗳️  Threshold: ${multisigAccount.data.threshold}`);
@@ -256,7 +255,7 @@ async function main() {
     const recipientInput = await prompt('Enter recipient wallet address: ');
     if (!recipientInput.trim()) {
       console.log('❌ Recipient address is required.');
-      process.exit(1);
+      throw new Error('Recipient address is required');
     }
     
     // Choose payment type
@@ -272,7 +271,7 @@ async function main() {
       paymentType = 'USDC';
     } else {
       console.log('❌ Invalid choice. Please select 1 for SOL or 2 for USDC.');
-      process.exit(1);
+      throw new Error('Invalid payment type choice');
     }
     
     // Get vault address and display vault balances before prompting for amount
@@ -286,12 +285,11 @@ async function main() {
     const amount = parseFloat(amountInput);
     if (isNaN(amount) || amount <= 0) {
       console.log('❌ Invalid amount. Please enter a positive number.');
-      process.exit(1);
+      throw new Error('Invalid amount');
     }
     
     // Display payment proposal summary
     console.log('\n📋 Payment Proposal Summary:');
-    console.log(`👤 Manager: ${proposerAddress}`);
     console.log(`🏛️  Multisig: ${multisigAddress}`);
     console.log(`👥 Recipient: ${recipientInput}`);
     console.log(`💵 Amount: ${amount} ${paymentType}`);
@@ -299,7 +297,7 @@ async function main() {
     console.log('🚀 Proceeding with payment proposal...');
     
     // Create the payment proposal
-    await proposePaymentTransaction(proposer, multisigAddress, recipientInput, amount, paymentType);
+    await proposePaymentTransaction(multisigAddress, recipientInput, amount, paymentType, proposer);    
     
     console.log('\n🎉 Payment proposal completed successfully!');
     console.log('📋 The proposal is now pending approval from multisig members.');
@@ -309,7 +307,7 @@ async function main() {
     if (error && typeof error === 'object' && 'logs' in error) {
       console.error('Transaction logs:', (error as any).logs);
     }
-    process.exit(1);
+    throw error; // Let the CLI handle the error gracefully
   }
 }
 

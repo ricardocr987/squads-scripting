@@ -38,7 +38,22 @@ export async function saveConfig(configData: ConfigData): Promise<void> {
   writeFileSync(configPath, JSON.stringify(configData, null, 2));
 }
 
-// Wallet Management Functions
+// Wallet Management Functions (Legacy - for backward compatibility)
+
+// Signer Management Functions (Simplified)
+export async function loadAllSignersFromConfig(): Promise<void> {
+  try {
+    // Load all wallets to ensure they exist and are valid
+    await loadWalletFromConfig('manager');
+    await loadWalletFromConfig('voter1');
+    await loadWalletFromConfig('voter2');
+    console.log('✅ All signers loaded from config');
+  } catch (error) {
+    throw new Error(`Failed to load signers from config: ${error}`);
+  }
+}
+
+// Legacy wallet loading (for backward compatibility)
 export async function loadWalletFromConfig(walletName: WalletName): Promise<CryptoKeyPair> {
   try {
     const configData = await loadConfig();

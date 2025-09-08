@@ -13,7 +13,7 @@ import {
   getAddressFromPublicKey,
   generateKeyPair,
 } from '@solana/kit';
-import { loadWalletFromConfig } from './utils/config';
+import { loadWalletFromConfig, loadAllSignersFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
 import { prompt } from './utils/prompt';
 import { signAndSendTransaction } from './utils/sign';
@@ -22,7 +22,7 @@ import { type MemberArgs } from './utils/squads/types/member';
 import { type PeriodArgs } from './utils/squads/types/period';
 
 async function addMember(
-  manager: CryptoKeyPair,
+  configAuthority: CryptoKeyPair,
   multisigPda: string,
   newMemberAddress: string,
   permissions: number,
@@ -31,8 +31,8 @@ async function addMember(
   console.log('\n👥 Adding new member...');
   
   try {
-    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
-    const signer = await createSignerFromKeyPair(manager);
+    const configAuthorityAddress = await getAddressFromPublicKey(configAuthority.publicKey);
+    const signer = await createSignerFromKeyPair(configAuthority);
     
     const memberArgs: MemberArgs = {
       key: address(newMemberAddress),
@@ -53,8 +53,8 @@ async function addMember(
     
     const signature = await signAndSendTransaction(
       [instruction],
-      [manager],
-      managerAddress
+      [configAuthority],
+      configAuthorityAddress
     );
     
     console.log(`✅ Member added successfully!`);
@@ -67,7 +67,7 @@ async function addMember(
 }
 
 async function removeMember(
-  manager: CryptoKeyPair,
+  configAuthority: CryptoKeyPair,
   multisigPda: string,
   memberAddress: string,
   memo?: string
@@ -75,8 +75,8 @@ async function removeMember(
   console.log('\n👥 Removing member...');
   
   try {
-    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
-    const signer = await createSignerFromKeyPair(manager);
+    const configAuthorityAddress = await getAddressFromPublicKey(configAuthority.publicKey);
+    const signer = await createSignerFromKeyPair(configAuthority);
     
     const instruction = getMultisigRemoveMemberInstruction({
       multisig: address(multisigPda),
@@ -91,8 +91,8 @@ async function removeMember(
     
     const signature = await signAndSendTransaction(
       [instruction],
-      [manager],
-      managerAddress
+      [configAuthority],
+      configAuthorityAddress
     );
     
     console.log(`✅ Member removed successfully!`);
@@ -106,7 +106,7 @@ async function removeMember(
 
 
 async function addSpendingLimit(
-  manager: CryptoKeyPair,
+  configAuthority: CryptoKeyPair,
   multisigPda: string,
   vaultIndex: number,
   mint: string,
@@ -119,8 +119,8 @@ async function addSpendingLimit(
   console.log('\n💰 Adding spending limit...');
   
   try {
-    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
-    const signer = await createSignerFromKeyPair(manager);
+    const configAuthorityAddress = await getAddressFromPublicKey(configAuthority.publicKey);
+    const signer = await createSignerFromKeyPair(configAuthority);
     
     // Generate a random key for the spending limit
     const createKey = await generateKeyPair();
@@ -153,8 +153,8 @@ async function addSpendingLimit(
     
     const signature = await signAndSendTransaction(
       [instruction],
-      [manager],
-      managerAddress
+      [configAuthority],
+      configAuthorityAddress
     );
     
     console.log(`✅ Spending limit added successfully!`);
@@ -167,7 +167,7 @@ async function addSpendingLimit(
 }
 
 async function removeSpendingLimit(
-  manager: CryptoKeyPair,
+  configAuthority: CryptoKeyPair,
   multisigPda: string,
   spendingLimitAddress: string,
   memo?: string
@@ -175,14 +175,14 @@ async function removeSpendingLimit(
   console.log('\n💰 Removing spending limit...');
   
   try {
-    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
-    const signer = await createSignerFromKeyPair(manager);
+    const configAuthorityAddress = await getAddressFromPublicKey(configAuthority.publicKey);
+    const signer = await createSignerFromKeyPair(configAuthority);
     
     const instruction = getMultisigRemoveSpendingLimitInstruction({
       multisig: address(multisigPda),
       configAuthority: signer,
       spendingLimit: address(spendingLimitAddress),
-      rentCollector: address(managerAddress),
+      rentCollector: address(configAuthorityAddress),
       memo: memo || null
     });
     
@@ -190,8 +190,8 @@ async function removeSpendingLimit(
     
     const signature = await signAndSendTransaction(
       [instruction],
-      [manager],
-      managerAddress
+      [configAuthority],
+      configAuthorityAddress
     );
     
     console.log(`✅ Spending limit removed successfully!`);
@@ -204,7 +204,7 @@ async function removeSpendingLimit(
 }
 
 async function setRentCollector(
-  manager: CryptoKeyPair,
+  configAuthority: CryptoKeyPair,
   multisigPda: string,
   rentCollectorAddress: string,
   memo?: string
@@ -212,8 +212,8 @@ async function setRentCollector(
   console.log('\n🏦 Setting rent collector...');
   
   try {
-    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
-    const signer = await createSignerFromKeyPair(manager);
+    const configAuthorityAddress = await getAddressFromPublicKey(configAuthority.publicKey);
+    const signer = await createSignerFromKeyPair(configAuthority);
     
     const instruction = getMultisigSetRentCollectorInstruction({
       multisig: address(multisigPda),
@@ -228,8 +228,8 @@ async function setRentCollector(
     
     const signature = await signAndSendTransaction(
       [instruction],
-      [manager],
-      managerAddress
+      [configAuthority],
+      configAuthorityAddress
     );
     
     console.log(`✅ Rent collector set successfully!`);
@@ -275,16 +275,19 @@ async function main() {
     console.log('⚙️  Squads Config Management Tool');
     console.log('==================================\n');
     
+    // Load all signers from config
+    console.log('✅ Loading signers from config...');
+    await loadAllSignersFromConfig();
+    
     // Load multisig address from config
     console.log('✅ Loading multisig address...');
     const multisigAddress = await loadMultisigAddressFromConfig();
     console.log(`🏛️  Multisig Address: ${multisigAddress}`);
     
-    // Load manager wallet
-    console.log('✅ Loading manager wallet...');
-    const manager = await loadWalletFromConfig('manager');
-    const managerAddress = await getAddressFromPublicKey(manager.publicKey);
-    console.log(`👤 Manager: ${managerAddress}`);
+    // Load the manager wallet for configuration operations
+    const configAuthority = await loadWalletFromConfig('manager');
+    const configAuthorityAddress = await getAddressFromPublicKey(configAuthority.publicKey);
+    console.log(`👤 Config Authority Address: ${configAuthorityAddress}`);
     
     // Display current multisig info
     await displayMultisigInfo(multisigAddress);
@@ -308,7 +311,7 @@ async function main() {
           const permissions = parseInt(permissionsChoice) || 7;
           const memo = await prompt('Enter memo (optional): ');
           
-          await addMember(manager, multisigAddress, memberAddress, permissions, memo);
+          await addMember(configAuthority, multisigAddress, memberAddress, permissions, memo);
           break;
         }
         
@@ -316,7 +319,7 @@ async function main() {
           const memberAddress = await prompt('Enter member address to remove: ');
           const memo = await prompt('Enter memo (optional): ');
           
-          await removeMember(manager, multisigAddress, memberAddress, memo);
+          await removeMember(configAuthority, multisigAddress, memberAddress, memo);
           break;
         }
         
@@ -324,7 +327,7 @@ async function main() {
           const rentCollectorAddress = await prompt('Enter rent collector address: ');
           const memo = await prompt('Enter memo (optional): ');
           
-          await setRentCollector(manager, multisigAddress, rentCollectorAddress, memo);
+          await setRentCollector(configAuthority, multisigAddress, rentCollectorAddress, memo);
           break;
         }
         
@@ -347,7 +350,7 @@ async function main() {
           const destinations = destinationsInput.split(',').map(addr => addr.trim()).filter(addr => addr);
           
           await addSpendingLimit(
-            manager, 
+            configAuthority,
             multisigAddress, 
             parseInt(vaultIndex), 
             mint, 
@@ -364,7 +367,7 @@ async function main() {
           const spendingLimitAddress = await prompt('Enter spending limit address to remove: ');
           const memo = await prompt('Enter memo (optional): ');
           
-          await removeSpendingLimit(manager, multisigAddress, spendingLimitAddress, memo);
+          await removeSpendingLimit(configAuthority, multisigAddress, spendingLimitAddress, memo);
           break;
         }
         

@@ -140,12 +140,18 @@ async function runScript(script: ScriptOption) {
     await script.function();
     
   } catch (error) {
-    console.error('\n❌ Script failed:', error);
-    if (error && typeof error === 'object' && 'logs' in error) {
-      console.error('Transaction logs:', (error as any).logs);
+    // Check if this is a simulation error
+    if (error && typeof error === 'object' && 'isSimulationError' in error && (error as any).isSimulationError) {
+      console.error(`\n❌ Error: ${error.message}`);
+      console.log('⚠️  Continuing with CLI...');
+    } else {
+      console.error('\n❌ Script failed:', error);
+      if (error && typeof error === 'object' && 'logs' in error) {
+        console.error('Transaction logs:', (error as any).logs);
+      }
+      // Don't throw - let the CLI continue running
+      console.log('⚠️  Continuing with CLI...');
     }
-    // Don't throw - let the CLI continue running
-    console.log('⚠️  Continuing with CLI...');
   }
 }
 

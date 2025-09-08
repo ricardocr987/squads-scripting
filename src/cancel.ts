@@ -9,7 +9,7 @@ import {
   getAddressFromPublicKey,
   type Address
 } from '@solana/kit';
-import { loadWalletFromConfig } from './utils/config';
+import { loadWalletFromConfig, loadAllSignersFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
 import { signAndSendTransaction } from './utils/sign';
 import { sleep } from 'bun';
@@ -20,18 +20,20 @@ async function main() {
     console.log('🚫 Proposal Cancellation Script');
     console.log('===============================\n');
     
+    // Load all signers from config
+    console.log('✅ Loading signers from config...');
+    await loadAllSignersFromConfig();
+    
     // Load multisig address from config
     console.log('✅ Loading multisig address...');
     const multisigAddress = await loadMultisigAddressFromConfig();
     console.log(`🏛️  Multisig Address: ${multisigAddress}`);
-    
-    // Load a wallet for signing (using voter1 as default)
-    console.log('✅ Loading wallet for signing...');
-    console.log('Note: Only Voters can cancel proposals');
-    const executor = await loadWalletFromConfig('voter1');
-    const signer = await createSignerFromKeyPair(executor);
-    const signerAddress = await getAddressFromPublicKey(executor.publicKey);
-    console.log(`👤 Signer: ${signerAddress}`);
+
+    // Load the manager's wallet (default for cancellation)
+    console.log('✅ Loading manager wallet for signing...');
+    const canceller = await loadWalletFromConfig('manager');
+    const cancellerAddress = await getAddressFromPublicKey(canceller.publicKey);
+    console.log(`👤 Canceller Address: ${cancellerAddress}`);
 
     // Get multisig account info
     const multisigAccount = await fetchMultisig(rpc, address(multisigAddress));
@@ -85,19 +87,19 @@ async function main() {
         const cancelInstruction = getProposalCancelInstruction({
           multisig: address(multisigAddress),
           proposal: address(proposal.pda),
-          member: signer,
+          member: await createSignerFromKeyPair(canceller),
           args: {
-            memo: `Cancelled by ${signerAddress}`,
+            memo: `Cancelled by canceller`,
           },
         });
 
         console.log('📤 Sending cancellation transaction...');
         
-        // Send and confirm transaction using utility function
+        // Send and confirm transaction using canceller
         const signature = await signAndSendTransaction(
           [cancelInstruction],
-          [executor],
-          signerAddress
+          [canceller],
+          cancellerAddress
         );
         
         console.log(`✅ Proposal ${proposal.index} cancelled`);
@@ -118,7 +120,7 @@ async function main() {
     console.log('💡 All eligible stale proposals have been cancelled.');
   } catch (error) {
     console.error('❌ Error cancelling proposals:', error);
-    process.exit(1);
+    throw error; // Let the CLI handle the error gracefully
   }
 }
 

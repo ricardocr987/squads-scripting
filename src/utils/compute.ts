@@ -50,6 +50,37 @@ export interface PriorityFeeResponse {
 const DEFAULT_COMPUTE_UNITS = 1_400_000;
 const DEFAULT_PRIORITY_FEE = 50000;
 
+function extractErrorMessage(logs: string[]): string | null {
+  for (const log of logs) {
+    // Look for Squads program error format: "Error Code: ErrorName. Error Number: XXXX. Error Message: ErrorMessage"
+    const errorMatch = log.match(/Error Code: (\w+)\. Error Number: \d+\. Error Message: (.+)/);
+    if (errorMatch && errorMatch[1]) {
+      return errorMatch[1]; // Return just the error name (e.g., "AlreadyApproved")
+    }
+    
+    // Look for other common error patterns
+    if (log.includes('InvalidLockupAmount')) {
+      return 'Invalid staked amount: Should be > 1';
+    }
+    if (log.includes('0x1771') || log.includes('0x178c')) {
+      return 'Maximum slippage reached';
+    }
+    if (log.includes('insufficient funds')) {
+      return 'Insufficient USDC balance for this transaction';
+    }
+    if (log.includes('Error: insufficient funds')) {
+      return 'Insufficient USDC balance for this transaction';
+    }
+    if (
+      log.includes('Program 11111111111111111111111111111111 failed: custom program error: 0x1') ||
+      log.includes('insufficient lamports')
+    ) {
+      return 'You need more SOL to pay for transaction fees';
+    }
+  }
+  return null;
+}
+
 async function getComputeUnits(
   wireTransaction: Base64EncodedWireTransaction
 ): Promise<number> {
@@ -61,7 +92,7 @@ async function getComputeUnits(
     .send();
 
     if (simulation.value.err && simulation.value.logs) {
-      if ((simulation.value.err as any).InsufficientFundsForRent) {
+      if (simulation.value.err.toString().includes('InsufficientFundsForRent')) {
         throw new Error('You need more SOL to pay for transaction fees');
       }
 
@@ -79,34 +110,13 @@ async function getComputeUnits(
         throw new Error('Insufficient USDC balance for this transaction');
       }
 
-      const numLogs = simulation.value.logs.length;
-    const lastLogs = simulation.value.logs.slice(Math.max(numLogs - 10, 0));
-    console.log(`Last ${lastLogs.length} Solana simulation logs:`, lastLogs);
-    console.log('base64 encoded transaction:', wireTransaction);
+      // Extract specific error message from program logs
+      const errorMessage = extractErrorMessage(simulation.value.logs);
+      if (errorMessage) {
+        throw new Error(errorMessage);
+      }
 
-    for (const log of simulation.value.logs) {
-      if (log.includes('InvalidLockupAmount')) {
-        throw new Error('Invalid staked amount: Should be > 1');
-      }
-      if (log.includes('0x1771') || log.includes('0x178c')) {
-        throw new Error('Maximum slippage reached');
-      }
-      if (log.includes('insufficient funds')) {
-        throw new Error('Insufficient USDC balance for this transaction');
-      }
-      if (log.includes('Error: insufficient funds')) {
-        throw new Error('Insufficient USDC balance for this transaction');
-      }
-      if (
-        log.includes(
-          'Program 11111111111111111111111111111111 failed: custom program error: 0x1'
-        ) ||
-        log.includes('insufficient lamports')
-      ) {
-        throw new Error('You need more SOL to pay for transaction fees');
-      }
-    }
-
+    // If no specific error was found, throw generic simulation error
     throw new Error('Transaction simulation error');
   }
 
@@ -245,6 +255,8 @@ export async function getComputeBudget(
 
     return [computeBudgetIx, priorityFeeIx, ...instructions];
   } catch (error) {
+    // Mark all errors from this function as simulation errors
+    (error as any).isSimulationError = true;
     throw error;
   }
 }

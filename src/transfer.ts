@@ -7,7 +7,7 @@ import {
   getAddressFromPublicKey
 } from '@solana/kit';
 import { transferInstruction } from './utils/transfer';
-import { loadWalletFromConfig, loadMultisigAddressFromConfig } from './utils/config';
+import { loadWalletFromConfig, loadAllSignersFromConfig, loadMultisigAddressFromConfig } from './utils/config';
 import { prompt } from './utils/prompt';
 import { signAndSendTransaction } from './utils/sign';
 import { checkSolBalance, checkUSDCBalance } from './utils/balance';
@@ -15,9 +15,9 @@ import { USDC_MINT_DEVNET as USDC_MINT } from './utils/constants';
 
 
 async function transferToMultisigVault(
-  sender: CryptoKeyPair,
   amount: number,
-  tokenMint: string = USDC_MINT
+  tokenMint: string,
+  sender: CryptoKeyPair
 ): Promise<void> {
   console.log('\n💰 Transferring to Multisig Vault');
   console.log('=================================\n');
@@ -32,6 +32,7 @@ async function transferToMultisigVault(
     console.log(`🪙 Token Mint: ${tokenMint}`);
     console.log(`💵 Amount: ${amount} tokens`);
     
+    const senderAddress = await getAddressFromPublicKey(sender.publicKey);
     // Create transfer instruction using Solana Kit
     const transferAmount = BigInt(amount * Math.pow(10, 6)); // Convert to raw token amount (assuming 6 decimals)
     const transferIxns = await transferInstruction(
@@ -42,9 +43,8 @@ async function transferToMultisigVault(
     );
     
     console.log('📤 Sending transfer transaction...');
-    const senderAddress = await getAddressFromPublicKey(sender.publicKey);
     
-    // Send and confirm transaction using utility function
+    // Send and confirm transaction using sender
     const signature = await signAndSendTransaction(
       transferIxns,
       [sender],
@@ -70,11 +70,15 @@ async function main() {
     console.log('💰 Multisig Vault Transfer Tool');
     console.log('===============================\n');
     
-    // Load sender wallet
+    // Load all signers from config
+    console.log('✅ Loading signers from config...');
+    await loadAllSignersFromConfig();
+    
+    // Load sender wallet for balance checking
     console.log('✅ Loading sender wallet...');
     const sender = await loadWalletFromConfig('manager');
     const senderAddress = await getAddressFromPublicKey(sender.publicKey);
-    console.log(`📍 Sender Address: ${senderAddress}`);
+    console.log(`👤 Sender Address: ${senderAddress}`);
     
     // Check SOL balance
     const solBalance = await checkSolBalance(senderAddress);
@@ -83,7 +87,7 @@ async function main() {
     
     if (solBalance < 0.01) {
       console.log('❌ Insufficient SOL balance. Please send more SOL to the sender wallet.');
-      process.exit(1);
+      throw new Error('Insufficient SOL balance');
     }
     
     // Get transfer details
@@ -95,12 +99,12 @@ async function main() {
       
       if (isNaN(amount) || amount <= 0) {
         console.log('❌ Invalid amount. Please enter a positive number.');
-        process.exit(1);
+        throw new Error('Invalid amount');
       }
       
       if (amount > solBalance) {
         console.log(`❌ Insufficient SOL balance. Current: ${solBalance.toFixed(4)} SOL, Requested: ${amount} SOL`);
-        process.exit(1);
+        throw new Error('Insufficient SOL balance');
       }
       
       // Display transfer summary
@@ -111,7 +115,7 @@ async function main() {
       console.log('🚀 Proceeding with SOL transfer...');
       
       // For SOL transfers to vault, we need to use the SOL mint address
-      await transferToMultisigVault(sender, amount, 'So11111111111111111111111111111111111111112');
+      await transferToMultisigVault(amount, 'So11111111111111111111111111111111111111112', sender);
       
     } else if (tokenType.toLowerCase() === 'usdc') {
       const amountInput = await prompt('Enter USDC amount to transfer: ');
@@ -119,7 +123,7 @@ async function main() {
       
       if (isNaN(amount) || amount <= 0) {
         console.log('❌ Invalid amount. Please enter a positive number.');
-        process.exit(1);
+        throw new Error('Invalid amount');
       }
       
       // Display transfer summary
@@ -130,11 +134,11 @@ async function main() {
       console.log(`🎯 Destination: Multisig Vault`);
       console.log('🚀 Proceeding with USDC transfer...');
       
-      await transferToMultisigVault(sender, amount, USDC_MINT);
+      await transferToMultisigVault(amount, USDC_MINT, sender);
       
     } else {
       console.log('❌ Invalid token type. Please choose "sol" or "usdc".');
-      process.exit(1);
+      throw new Error('Invalid token type');
     }
     
     console.log('\n🎉 Transfer completed successfully!');
@@ -144,7 +148,7 @@ async function main() {
     if (error && typeof error === 'object' && 'logs' in error) {
       console.error('Transaction logs:', (error as any).logs);
     }
-    process.exit(1);
+    throw error; // Let the CLI handle the error gracefully
   }
 }
 

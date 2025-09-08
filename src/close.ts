@@ -6,8 +6,8 @@ import {
   fetchMaybeProposal,
   fetchMaybeVaultTransaction,
 } from './utils/squads/index';
-import { address, getAddressFromPublicKey } from '@solana/kit';
-import { loadWalletFromConfig } from './utils/config';
+import { address, createSignerFromKeyPair, getAddressFromPublicKey } from '@solana/kit';
+import { loadWalletFromConfig, loadAllSignersFromConfig } from './utils/config';
 import { loadMultisigAddressFromConfig } from './utils/config';
 import { sleep } from 'bun';
 import { rpc } from './utils/rpc';
@@ -75,18 +75,27 @@ async function getClosableTransactions(multisigAddress: string) {
 }
 
 async function selectMember(): Promise<'voter1' | 'voter2' | 'manager'> {
-  const members = ['voter1', 'voter2', 'manager'];
+  const members = ['manager', 'voter1', 'voter2'];
   
   console.log('\n👥 Available Members:');
   members.forEach((member, index) => {
-    console.log(`   ${index + 1}. ${member}`);
+    const isDefault = member === 'manager' ? ' (default)' : '';
+    console.log(`   ${index + 1}. ${member}${isDefault}`);
   });
   
-  const choice = await prompt('\nSelect member to sign the close transaction (1-3): ');
-  const memberIndex = parseInt(choice || '0') - 1;
+  const choice = await prompt('\nSelect member to sign the close transaction (1-3, or press Enter for manager): ');
+  
+  // Default to manager if no choice or invalid choice
+  if (!choice || choice.trim() === '') {
+    console.log('✅ Using default: manager');
+    return 'manager';
+  }
+  
+  const memberIndex = parseInt(choice) - 1;
   
   if (memberIndex < 0 || memberIndex >= members.length) {
-    throw new Error('Invalid member selection');
+    console.log('❌ Invalid choice, using default: manager');
+    return 'manager';
   }
   
   return members[memberIndex] as 'voter1' | 'voter2' | 'manager';
@@ -132,6 +141,10 @@ async function main() {
     console.log('🧹 Transaction Cleanup Script');
     console.log('============================\n');
     
+    // Load all signers from config
+    console.log('✅ Loading signers from config...');
+    await loadAllSignersFromConfig();
+    
     // Load multisig address from config
     console.log('✅ Loading multisig address...');
     const multisigAddress = await loadMultisigAddressFromConfig();
@@ -156,16 +169,16 @@ async function main() {
       return;
     }
     
-    // Select member to sign
+    // Select member to sign (default to manager)
     const selectedMember = await selectMember();
     console.log(`\n✅ Selected member: ${selectedMember}`);
-    
+
     // Load the selected member's wallet
     console.log('✅ Loading wallet for signing...');
-    const executor = await loadWalletFromConfig(selectedMember);
-    const signerAddress = await getAddressFromPublicKey(executor.publicKey);
-    console.log(`👤 Signer: ${signerAddress}`);
-    
+    const cleaner = await loadWalletFromConfig(selectedMember);
+    const cleanerAddress = await getAddressFromPublicKey(cleaner.publicKey);
+    console.log(`👤 Cleaner Address: ${cleanerAddress}`);
+
     // Confirm closing
     const confirm = await prompt(`\n🧹 Are you sure you want to close ${selectedTransactions.length} transaction(s)? (y/N): `);
     if (confirm.toLowerCase() !== 'y' && confirm.toLowerCase() !== 'yes') {
@@ -191,16 +204,16 @@ async function main() {
           multisig: address(multisigAddress),
           proposal: address(tx.proposalPda),
           transaction: address(tx.pda),
-          rentCollector: address(signerAddress),
+          rentCollector: address(cleanerAddress),
         });
 
         console.log('📤 Sending close transaction...');
         
-        // Prepare transaction using @solana/kit
+        // Send and confirm transaction using cleaner
         const signature = await signAndSendTransaction(
           [closeInstruction],
-          [executor],
-          signerAddress
+          [cleaner],
+          cleanerAddress
         );
         
         console.log(`✅ Transaction #${tx.index} closed successfully by ${selectedMember} with signature ${signature}!`);
@@ -217,7 +230,7 @@ async function main() {
     console.log('💡 All selected transactions have been closed and cleaned up.');
   } catch (error) {
     console.error('❌ Error closing transactions:', error);
-    process.exit(1);
+    throw error; // Let the CLI handle the error gracefully
   }
 }
 

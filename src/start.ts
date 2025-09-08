@@ -19,6 +19,7 @@ import {
   saveMultisigAddressToConfig,
   saveKeypairsToConfig,
   loadWalletFromConfig,
+  loadAllSignersFromConfig,
 } from './utils/config';
 import { 
   generateManagerVoterWallets,
@@ -152,7 +153,7 @@ async function createMultisigProgrammatically(manager: CryptoKeyPair, voter1: Ad
       memo: 'Multisig created via Solana Kit and Squads utils',
     });
 
-    // Send and confirm transaction using utility function
+    // Send and confirm transaction using creator
     const signature = await signAndSendTransaction(
       [multisigCreateInstruction],
       [manager, ephemeralKeypair],
@@ -266,7 +267,7 @@ async function sendSOLToVoters(
     
     console.log('📤 Sending SOL transfers...');
     
-    // Send and confirm transaction using utility function
+    // Send and confirm transaction using sender
     const signature = await signAndSendTransaction(
       instructions,
       [sender],
@@ -308,7 +309,7 @@ async function depositSOLToVault(
     console.log('📤 Sending SOL deposit to vault...');
     const senderAddress = await getAddressFromPublicKey(sender.publicKey);
     
-    // Send and confirm transaction using utility function
+    // Send and confirm transaction using sender
     const signature = await signAndSendTransaction(
       transferIxns,
       [sender],
@@ -349,7 +350,7 @@ async function createUSDCTransferToMultisig(
     console.log('📤 Sending USDC transfer transaction...');
     const senderAddress = await getAddressFromPublicKey(sender.publicKey);
     
-    // Send and confirm transaction using utility function
+    // Send and confirm transaction using sender
     const signature = await signAndSendTransaction(
       transferIxns,
       [sender],
@@ -391,12 +392,15 @@ async function main() {
       manager = await loadWalletFromConfig('manager');
       voter1 = await loadWalletFromConfig('voter1');
       voter2 = await loadWalletFromConfig('voter2');
+      
+      // Load all signers for the new system
+      await loadAllSignersFromConfig();
     } else {
       console.log('📁 No existing config.json found, generating new wallets...');
       const wallets = await generateManagerVoterWallets();
-      manager = wallets.manager;
-      voter1 = wallets.voter1;
-      voter2 = wallets.voter2;
+      manager = wallets.managerKeypair;
+      voter1 = wallets.voter1Keypair;
+      voter2 = wallets.voter2Keypair;
       
       // Save the generated wallets to config.json
       await saveKeypairsToConfig(
@@ -407,6 +411,9 @@ async function main() {
         wallets.voter1KeypairBytes,
         wallets.voter2KeypairBytes
       );
+      
+      // Load all signers for the new system
+      await loadAllSignersFromConfig();
     }
     const managerAddress = await getAddressFromPublicKey(manager.publicKey);
     const voter1Address = await getAddressFromPublicKey(voter1.publicKey);
