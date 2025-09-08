@@ -71,8 +71,8 @@ src/
     ├── balance.ts     // Token balance monitoring and validation
     ├── transfer.ts    // Transfer instruction utilities
     ├── prepare.ts     // Transaction preparation with @solana/kit
-    ├── sign.ts        // Transaction signing utilities with signer selection
-    ├── rpc.ts         // RPC client and transaction factory setup
+    ├── sign.ts        // Transaction signing and sending utilities with @solana/kit
+    ├── rpc.ts         // @solana/kit and @solana/web3js RPC client, send and confirm util
     └── prompt.ts      // Interactive CLI prompts
 ```
 
@@ -144,23 +144,20 @@ The initialization process handles several critical tasks:
 - **Transaction Building:** Uses Codama-generated instructions with Solana Kit's transaction utilities:
 
 ```typescript
-// Load all signers from configuration
-await loadAllSignersFromConfig();
-
 // Prepare the instruction with codama generated utils
 const multisigCreateInstruction = getMultisigCreateV2Instruction(multisigConfig);
 
 // Send and confirm transaction using centralized signer system
 const signature = await signAndSendTransaction(
   [multisigCreateInstruction],
-  [manager, ephemeralKeypair],
-  managerAddress
+  [manager, ephemeralKeypair], // signers
+  managerAddress // feePayer
 );
 ```
 
-- **Keypair Generation:** Creates secure keypairs for all participants using Web Crypto API primitives.
+- **Keypair Generation:** Creates keypairs for all participants using Web Crypto API primitives.
 
-  **Security Warning:** The `extractable: true` parameter and file-based storage are used here for development simplicity. More [info](https://solana.stackexchange.com/questions/17378/how-to-generate-and-save-a-keypair-with-solana-kit-solana-web3-js-v2)
+  **Security Warning:** The `extractable: true` parameter and file-based storage are used here for development simplicity. (More [info](https://solana.stackexchange.com/questions/17378/how-to-generate-and-save-a-keypair-with-solana-kit-solana-web3-js-v2))
   
 ```typescript
 const keypair = await crypto.subtle.generateKey(
@@ -189,7 +186,8 @@ const sender = await loadWalletFromConfig('manager');
 const signer = await createSignerFromKeyPair(sender);
 const transferIxns = await transferInstruction(signer, transferAmount, SOL_MINT, vaultPda);
 
-// Use centralized signer system for transaction execution
+// Get the address from the CryptoKey to use it as a feePayer, then sign it, send and confirm the signed transaction
+const proposerAddress = await getAddressFromPublicKey(proposer.publicKey);
 const signature = await signAndSendTransaction(
   transferIxns,
   [sender],
@@ -199,7 +197,7 @@ const signature = await signAndSendTransaction(
 
 ### Step 2: Creating Payment Proposals
 
-The proposal system demonstrates one of the most interesting aspects of this integration: combining Squads SDK with Solana Kit. Due to serialization complexities with Codama-generated utilities, the Squads SDK is used for vault transaction creation, converting the result to Solana Kit data structure format. Here's how the proposal creation works:
+The proposal system demonstrates one of the most interesting aspects of this integration: combining Squads SDK with Solana Kit. Due to serialization complexities with Codama-generated utilities, the Squads SDK is used for vault transaction instruction creation, converting the result to Solana Kit data structure format. Here's how the proposal creation works:
 
 ```typescript
 const proposerAddress = await getAddressFromPublicKey(proposer.publicKey);
@@ -219,7 +217,6 @@ const vaultTransaction = multisig.instructions.vaultTransactionCreate({
 // Convert to Solana Kit format
 const vaultInstruction = fromLegacyTransactionInstruction(vaultTransaction);
 
-// Use centralized signer system for transaction execution
 const signature = await signAndSendTransaction(
   [vaultInstruction],
   [proposer],
@@ -227,33 +224,7 @@ const signature = await signAndSendTransaction(
 );
 ```
 
-This pattern demonstrates how to bridge different Solana libraries while maintaining type safety and consistency. The `fromLegacyTransactionInstruction` function from `@solana/compat` handles the conversion.
-
-### Signer System Architecture
-
-The centralized signer management system provides a unified interface for all transaction operations:
-
-```typescript
-const proposerAddress = await getAddressFromPublicKey(proposer.publicKey);
-const signature = await signAndSendTransaction(
-  [instruction],
-  [proposer],
-  proposerAddress
-);
-```
-
-**Key Components:**
-
-- **`sign.ts`**: Transaction signing utilities with direct signer usage
-- **`rpc.ts`**: RPC client setup with `sendAndConfirmTransactionFactory`
-- **`config.ts`**: Wallet loading and configuration management
-
-**Benefits:**
-
-- **Consistent Interface**: All scripts use the same signing pattern
-- **Direct Signer Usage**: Each script loads the appropriate signer directly
-- **Simplified Architecture**: No complex signer selection system needed
-- **Type Safety**: Full TypeScript support throughout the signing process
+This pattern demonstrates how to bridge different Solana libraries while maintaining type safety and consistency. The `fromLegacyTransactionInstruction` function from `@solana/compat` handles the conversion, allowing backwards compatibility.
 
 ### Step 3: The Voting Process
 
@@ -269,7 +240,6 @@ const approveInstruction = getProposalApproveInstruction({
   },
 });
 
-const voterAddress = await getAddressFromPublicKey(voter.publicKey);
 const signature = await signAndSendTransaction(
   [approveInstruction],
   [voter],
@@ -282,7 +252,6 @@ const signature = await signAndSendTransaction(
 The execution phase is the final step in the multisig process, where approved transactions are submitted to the Solana network. This requires careful validation to ensure the transaction has received sufficient approvals and the executor has the necessary permissions. The execution process follows the same pattern as other operations - prepare, sign, and submit to the network:
 
 ```typescript
-const executorAddress = await getAddressFromPublicKey(executor.publicKey);
 const executeInstructionResult = await multisig.instructions.vaultTransactionExecute({
   connection: solanaConnection,
   multisigPda: new PublicKey(multisigPda),
@@ -290,8 +259,6 @@ const executeInstructionResult = await multisig.instructions.vaultTransactionExe
   member: new PublicKey(executorAddress),
 });
 const vaultInstruction = fromLegacyTransactionInstruction(executeInstructionResult.instruction);
-
-// Use centralized signer system for execution
 const signature = await signAndSendTransaction(
   [vaultInstruction],
   [executor],
@@ -308,7 +275,6 @@ Squads supports two types of multisig configurations: controlled and non-control
 For controlled multisigs, configuration changes are straightforward:
 
 ```typescript
-const configAuthorityAddress = await getAddressFromPublicKey(configAuthority.publicKey);
 const memberArgs: MemberArgs = {
   key: address(newMemberAddress),
   permissions: { mask: permissions }
@@ -321,8 +287,6 @@ const instruction = getMultisigAddMemberInstruction({
   newMember: memberArgs,
   memo: memo || null
 });
-
-// Use centralized signer system for configuration changes
 const signature = await signAndSendTransaction(
   [instruction],
   [configAuthority],
@@ -330,7 +294,7 @@ const signature = await signAndSendTransaction(
 );
 ```
 
-For non-controlled multisigs, configuration changes would require a **Config Transaction** instead, this follows the same lifecycle as payment proposals: **Propose → Approve → Execute**, ensuring democratic governance of the multisig itself.
+For non-controlled multisigs, configuration changes would require a **Config Transaction** instead, this follows the same lifecycle as the payment proposal: **Propose → Approve → Execute**, ensuring democratic governance of the multisig itself.
 
 ### Information Dashboard
 
@@ -349,7 +313,7 @@ const executedTransactions = transactions.filter(tx => tx.status === 'Executed')
 
 ### Stale Proposal Management
 
-The system includes stale proposal detection and cleanup to maintain multisig efficiency. Stale proposals can be safely closed to recover rent:
+The system includes stale proposal detection and cleanup to recover rent:
 
 ```typescript
 // Identify transactions that can be safely closed to recover rent
@@ -415,7 +379,7 @@ The system uses several utility modules that work together to handle Solana bloc
 
 ### RPC and Connection Management (`rpc.ts`)
 
-This module creates connections to the Solana blockchain using both modern and legacy APIs. This approach ensures compatibility with the latest Solana Kit while supporting existing libraries like the Squads SDK.
+This module creates connections to the Solana blockchain using both modern and legacy APIs. This approach ensures compatibility with the latest Solana Kit while supporting existing libraries like the Squads SDK with the web3js rpc connection.
 
 ```typescript
 // Create RPC client using @solana/kit
@@ -433,11 +397,9 @@ The `rpcSubscriptions` client enables real-time monitoring by converting the HTT
 
 The `sendAndConfirmTransactionFactory` returns a function that you can call to send a blockhash-based transaction to the network and to wait until it has been confirmed.
 
-The legacy `web3.Connection` ensures compatibility with the Squads SDK, which hasn't migrated to the new APIs yet.
-
 ### Transaction Preparation (`prepare.ts`)
 
-This module builds Solana transactions by combining instructions with proper compute budgets and error handling on the simulation.
+This module builds Solana transactions by combining instructions with proper compute budget instructions estimate and error handling on the simulation.
 
 ```typescript
 export async function prepareTransaction(
@@ -467,91 +429,6 @@ The function starts by getting the latest blockhash, which acts as a timestamp a
 The `getComputeBudget` function estimates how much compute power the transaction needs by simulating it. It also calculates the right priority fee based on current network conditions to ensure the transaction gets processed successfully.
 
 The transaction is built using a functional approach with the `pipe` function. Each step adds a specific part: the fee payer, lifetime constraint, and instructions.
-
-### Transaction Signing (`sign.ts`)
-
-This module handles the complete process of signing and sending transactions to the blockchain.
-
-```typescript
-export async function signAndSendTransaction(
-  instructions: Instruction<string>[],
-  signers: CryptoKeyPair[],
-  feePayer: string,
-  commitment: 'processed' | 'confirmed' | 'finalized' = 'confirmed'
-): Promise<string> {  
-  // Prepare transaction with compute budget
-  const transactionMessage = await prepareTransaction(instructions, feePayer);
-  
-  // Sign the transaction message
-  const signedTransaction = await signTransaction(signers, transactionMessage);
-  assertIsSendableTransaction(signedTransaction);
-
-  // Send and confirm using the factory
-  await sendAndConfirmTransaction(signedTransaction, { commitment });
-  
-  return getSignatureFromTransaction(signedTransaction);
-}
-```
-
-The function uses the prepare module to build the transaction, then signs it with the provided signers. It validates the transaction before sending and uses the RPC factory to listen on transaction signature confirmation.
-
-The function returns the transaction signature, from the signed transaction, which can be used to track the transaction on blockchain explorers.
-
-### Transfer Utilities (`transfer.ts`)
-
-This module handles both SOL and SPL token transfers with ATA existence check and creation if needed.
-
-```typescript
-export async function transferInstruction(
-  signer: TransactionSigner,
-  amount: bigint,
-  mint: Address,
-  destination: Address
-): Promise<Instruction<string>[]> {
-  if (mint === 'So11111111111111111111111111111111111111112') {
-    // SOL transfer
-    return [getTransferSolInstruction({
-      source: signer,
-      destination: destination,
-      amount,
-    })];
-  } else {
-    // SPL token transfer with ATA creation
-    const [tokenAccount] = await findAssociatedTokenPda({
-      mint, owner: address(signer.address), tokenProgram: TOKEN_PROGRAM_ADDRESS,
-    });
-    
-    const [destinationTokenAccount] = await findAssociatedTokenPda({
-      mint, owner: destination, tokenProgram: TOKEN_PROGRAM_ADDRESS,
-    });
-
-    const instructions = [];
-    // Check if destination ATA exists and create if needed
-    const accountExists = await rpc.getAccountInfo(destinationTokenAccount, { encoding: 'base64' }).send();
-    if (!accountExists.value) {
-      instructions.push(getCreateAssociatedTokenInstruction({
-        mint, owner: destination, tokenProgram: TOKEN_PROGRAM_ADDRESS,
-        payer: signer, ata: destinationTokenAccount,
-      }));
-    }
-
-    instructions.push(getTransferInstruction({
-      source: tokenAccount, destination: destinationTokenAccount,
-      authority: signer, amount,
-    }));
-
-    return instructions;
-  }
-}
-```
-
-The function first checks if the transfer is for SOL (native Solana token) or an SPL token. SOL transfers are simple - just one instruction to move lamports between accounts.
-
-For SPL tokens, it's more complex. The function:
-1. Calculates the associated token account (ATA) addresses for both source and destination
-2. Checks if the destination ATA exists
-3. Creates the ATA if it doesn't exist
-4. Adds the transfer instruction
 
 ### Compute Budget Management (`compute.ts`)
 
@@ -623,8 +500,7 @@ The function adds a 10% buffer to the compute units (`Math.ceil(computeUnits * 1
 
 #### Supporting Functions
 
-**`getComputeUnits(wireTransaction: Base64EncodedWireTransaction): Promise<number>`**
-This function simulates the transaction to determine how much compute power it needs:
+The transaction simulation is executed without signature verification (since it's not signed yet) to get an accurate estimate of compute usage. It checks for common errors like insufficient funds and provides clear error messages to users.
 
 ```typescript
 async function getComputeUnits(
@@ -638,30 +514,10 @@ async function getComputeUnits(
     .send();
 
   if (simulation.value.err && simulation.value.logs) {
-    if (simulation.value.err.toString().includes('InsufficientFundsForRent')) {
-      throw new Error('You need more SOL to pay for transaction fees');
-    }
-
-    if (simulation.value.logs.length === 0) {
-      throw new Error('You need more SOL to pay for transaction fees');
-    }
-
-    // Check for specific insufficient funds error in logs
-    const hasInsufficientFunds = simulation.value.logs.some(log => 
-      log.includes('insufficient funds') || 
-      log.includes('Error: insufficient funds')
-    );
-    
-    if (hasInsufficientFunds) {
-      throw new Error('Insufficient USDC balance for this transaction');
-    }
-
     // Extract specific error message from program logs
     const errorMessage = extractErrorMessage(simulation.value.logs);
-    if (errorMessage) {
-      throw new Error(errorMessage);
-    }
-
+    if (errorMessage) throw new Error(errorMessage);
+    
     // If no specific error was found, throw generic simulation error
     throw new Error('Transaction simulation error');
   }
@@ -670,10 +526,7 @@ async function getComputeUnits(
 }
 ```
 
-The function simulates the transaction without signature verification (since it's not signed yet) to get an accurate estimate of compute usage. It checks for common errors like insufficient funds and provides clear error messages to users.
-
-**`extractErrorMessage(logs: string[]): string | null`**
-This function converts technical blockchain error messages into user-friendly explanations:
+Transaction simulation logs are parsed and converted into clear, actionable messages that users can understand and act on.
 
 ```typescript
 function extractErrorMessage(logs: string[]): string | null {
@@ -685,18 +538,9 @@ function extractErrorMessage(logs: string[]): string | null {
     }
     
     // Look for other common error patterns
-    if (log.includes('InvalidLockupAmount')) {
-      return 'Invalid staked amount: Should be > 1';
-    }
-    if (log.includes('0x1771') || log.includes('0x178c')) {
-      return 'Maximum slippage reached';
-    }
-    if (log.includes('insufficient funds')) {
-      return 'Insufficient USDC balance for this transaction';
-    }
-    if (log.includes('Error: insufficient funds')) {
-      return 'Insufficient USDC balance for this transaction';
-    }
+    if (log.includes('InvalidLockupAmount')) return 'Invalid staked amount: Should be > 1';
+    if (log.includes('0x1771') || log.includes('0x178c')) return 'Maximum slippage reached';
+    if (log.includes('Error: insufficient funds')) return 'Insufficient USDC balance for this transaction';
     if (
       log.includes('Program 11111111111111111111111111111111 failed: custom program error: 0x1') ||
       log.includes('insufficient lamports')
@@ -708,7 +552,90 @@ function extractErrorMessage(logs: string[]): string | null {
 }
 ```
 
-This function looks for specific error patterns in transaction logs and converts them into clear, actionable messages that users can understand and act on.
+### Transfer Utilities (`transfer.ts`)
+
+This module handles both SOL and SPL token transfers with ATA existence check and creation if needed.
+
+```typescript
+export async function transferInstruction(
+  signer: TransactionSigner,
+  amount: bigint,
+  mint: Address,
+  destination: Address
+): Promise<Instruction<string>[]> {
+  if (mint === 'So11111111111111111111111111111111111111112') {
+    // SOL transfer
+    return [getTransferSolInstruction({
+      source: signer,
+      destination: destination,
+      amount,
+    })];
+  } else {
+    // SPL token transfer with ATA creation
+    const [tokenAccount] = await findAssociatedTokenPda({
+      mint, owner: address(signer.address), tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+    
+    const [destinationTokenAccount] = await findAssociatedTokenPda({
+      mint, owner: destination, tokenProgram: TOKEN_PROGRAM_ADDRESS,
+    });
+
+    const instructions = [];
+    // Check if destination ATA exists and create if needed
+    const accountExists = await rpc.getAccountInfo(destinationTokenAccount, { encoding: 'base64' }).send();
+    if (!accountExists.value) {
+      instructions.push(getCreateAssociatedTokenInstruction({
+        mint, owner: destination, tokenProgram: TOKEN_PROGRAM_ADDRESS,
+        payer: signer, ata: destinationTokenAccount,
+      }));
+    }
+
+    instructions.push(getTransferInstruction({
+      source: tokenAccount, destination: destinationTokenAccount,
+      authority: signer, amount,
+    }));
+
+    return instructions;
+  }
+}
+```
+
+The function first checks if the transfer is for SOL (native Solana token) or an SPL token. SOL transfers are simple - just one instruction to move lamports between accounts.
+
+For SPL tokens, it's more complex. The function:
+1. Calculates the associated token account (ATA) addresses for both source and destination
+2. Checks if the destination ATA exists
+3. Creates the ATA if it doesn't exist
+4. Adds the transfer instruction
+
+### Transaction Signing (`sign.ts`)
+
+This module handles the complete process of signing and sending transactions to the blockchain.
+
+```typescript
+export async function signAndSendTransaction(
+  instructions: Instruction<string>[],
+  signers: CryptoKeyPair[],
+  feePayer: string,
+  commitment: 'processed' | 'confirmed' | 'finalized' = 'confirmed'
+): Promise<string> {  
+  // Prepare transaction with compute budget
+  const transactionMessage = await prepareTransaction(instructions, feePayer);
+  
+  // Sign the transaction message
+  const signedTransaction = await signTransaction(signers, transactionMessage);
+  assertIsSendableTransaction(signedTransaction);
+
+  // Send and confirm using the factory
+  await sendAndConfirmTransaction(signedTransaction, { commitment });
+  
+  return getSignatureFromTransaction(signedTransaction);
+}
+```
+
+The function uses the prepare module to build the transaction, then signs it with the provided signers. It validates the transaction before sending and uses the RPC factory to listen on transaction signature confirmation.
+
+The function returns the transaction signature, from the signed transaction, which can be used to track the transaction on blockchain explorers.
 
 ## Running the Complete System
 
